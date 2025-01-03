@@ -1,0 +1,173 @@
+import asyncio
+import copy
+import logging
+import pytest
+import pytest_asyncio
+
+from aiodabpumps import (
+    DabPumpsApi,
+    DabPumpsInstall,
+    DabPumpsDevice,
+    DabPumpsConfig,
+    DabPumpsParams,
+    DabPumpsStatus,
+    DabPumpsApiAuthError,
+    DabPumpsApiRightsError, 
+    DabPumpsApiError, 
+    DabPumpsApiHistoryItem, 
+    DabPumpsApiHistoryDetail,
+)
+
+from . import TEST_USERNAME, TEST_PASSWORD
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class TestContext:
+    def __init__(self):
+        self.api = None
+
+    async def cleanup(self):
+        if self.api:
+            await self.api.async_logout()
+            await self.api.async_close()
+
+
+@pytest_asyncio.fixture
+async def context():
+    # Prepare
+    ctx = TestContext()
+
+    # pass objects to tests
+    yield ctx
+
+    # cleanup
+    await ctx.cleanup()
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("context")
+@pytest.mark.parametrize(
+    "name, usr, pwd, exp_except",
+    [
+        ("login ok",   TEST_USERNAME, TEST_PASSWORD, None),
+        ("login fail", "dummy_usr",   "wrong_pwd",   DabPumpsApiAuthError),
+    ]
+)
+async def test_login(name, usr, pwd, exp_except, request):
+    context = request.getfixturevalue("context")
+    assert context.api is None
+
+    context.api = DabPumpsApi(usr, pwd)
+
+    if exp_except is None:
+        assert context.api.login_method is None
+
+        await context.api.async_login()
+
+        assert context.api.login_method is not None
+        assert context.api.install_map is not None
+        assert context.api.device_map is not None
+        assert context.api.config_map is not None
+        assert context.api.status_map is not None
+        assert context.api.string_map is not None
+        assert len(context.api.install_map) == 0
+        assert len(context.api.device_map) == 0
+        assert len(context.api.config_map) == 0
+        assert len(context.api.status_map) == 0
+        assert len(context.api.string_map) == 0
+
+    else:
+        with pytest.raises(exp_except):
+            await context.api.async_login()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("context")
+@pytest.mark.parametrize(
+    "name, exp_except",
+    [
+        ("data ok", None),
+    ]
+)
+async def test_data(name, exp_except, request):
+    context = request.getfixturevalue("context")
+    context.api = DabPumpsApi(TEST_USERNAME, TEST_PASSWORD)
+
+    # Login
+    await context.api.async_login()
+
+    # Get install list
+    await context.api.async_fetch_install_list()
+
+    assert context.api.install_map is not None
+    assert type(context.api.install_map) is dict
+    assert len(context.api.install_map) > 0
+
+    for install_id,install in context.api.install_map.items():
+        assert type(install_id) is str
+        assert type(install) is DabPumpsInstall
+
+    # Get install details
+    await context.api.async_fetch_install_details(install_id)
+
+    assert context.api.device_map is not None
+    assert type(context.api.device_map) is dict
+    assert len(context.api.device_map) > 0
+
+    for device_serial,device in context.api.device_map.items():
+        assert type(device_serial) is str
+        assert type(device) is DabPumpsDevice
+
+    # Get device config
+    await context.api.async_fetch_device_config(device.config_id)
+
+    assert context.api.config_map is not None
+    assert type(context.api.config_map) is dict
+    assert len(context.api.config_map) > 0
+
+    for config_id,config in context.api.config_map.items():
+        assert type(config_id) is str
+        assert type(config) is DabPumpsConfig
+
+        assert config.meta_params is not None
+        assert type(config.meta_params) is dict
+        assert len(config.meta_params) > 0
+
+        for param_name,param in config.meta_params.items():
+            assert type(param_name) is str
+            assert type(param) is DabPumpsParams
+
+    # Get device statusses
+    await context.api.async_fetch_device_statusses(device_serial)
+
+    assert context.api.status_map is not None
+    assert type(context.api.status_map) is dict
+    assert len(context.api.status_map) > 0
+
+    for status_id,status in context.api.status_map.items():
+        assert type(status_id) is str
+        assert type(status) is DabPumpsStatus
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("context")
+@pytest.mark.parametrize(
+    "name, lang, exp_lang",
+    [
+        ("strings en", 'en', 'en'),
+        ("strings nl", 'nl', 'nl'),
+        ("strings xx", 'xx', 'en'),
+    ]
+)
+async def test_strings(name, lang, exp_lang, request):
+    context = request.getfixturevalue("context")
+    context.api = DabPumpsApi("dummy_usr", "wrong_pwd") # no login needed
+
+    # Get strings
+    await context.api.async_fetch_strings(lang)
+
+    assert context.api.string_map is not None
+    assert type(context.api.string_map) is dict
+    assert len(context.api.string_map) > 0
+
+    assert context.api.string_map_lang == exp_lang
