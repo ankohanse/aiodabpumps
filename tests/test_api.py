@@ -106,6 +106,8 @@ async def test_data(name, exp_except, request):
     for install_id,install in context.api.install_map.items():
         assert type(install_id) is str
         assert type(install) is DabPumpsInstall
+        assert install.id is not None    
+        assert install.name is not None  
 
     # Get install details
     await context.api.async_fetch_install_details(install_id)
@@ -117,6 +119,16 @@ async def test_data(name, exp_except, request):
     for device_serial,device in context.api.device_map.items():
         assert type(device_serial) is str
         assert type(device) is DabPumpsDevice
+        assert device.id is not None    
+        assert device.serial is not None    
+        assert device.name is not None  
+        assert device.config_id is not None  
+        assert device.install_id is not None  
+
+    # Get device details
+    await context.api.async_fetch_device_details(device.serial)
+    device = context.api.device_map[device.serial]  # device properties have now refreshed
+    assert device.sw_version is not None
 
     # Get device config
     await context.api.async_fetch_device_config(device.config_id)
@@ -128,6 +140,8 @@ async def test_data(name, exp_except, request):
     for config_id,config in context.api.config_map.items():
         assert type(config_id) is str
         assert type(config) is DabPumpsConfig
+        assert config.id is not None
+        assert config.label is not None
 
         assert config.meta_params is not None
         assert type(config.meta_params) is dict
@@ -136,6 +150,7 @@ async def test_data(name, exp_except, request):
         for param_name,param in config.meta_params.items():
             assert type(param_name) is str
             assert type(param) is DabPumpsParams
+            assert param.key is not None
 
     # Get device statusses
     await context.api.async_fetch_device_statusses(device_serial)
@@ -147,6 +162,8 @@ async def test_data(name, exp_except, request):
     for status_id,status in context.api.status_map.items():
         assert type(status_id) is str
         assert type(status) is DabPumpsStatus
+        assert status.serial is not None
+        assert status.key is not None
 
 
 @pytest.mark.asyncio

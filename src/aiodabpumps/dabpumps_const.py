@@ -15,3 +15,9 @@ API_LOGIN.DABLIVE_APP_0 = 'DabLive_app_0'
 API_LOGIN.DABLIVE_APP_1 = 'DabLive_app_1'
 API_LOGIN.DCONNECT_APP = 'DConnect_app'
 API_LOGIN.DCONNECT_WEB = 'DConnect_web'
+
+# Extra device attributes that are not in install info, but retrieved from statusses
+DEVICE_ATTR_EXTRA = {
+    "mac_address": ['MacWlan'],
+    "sw_version": ['LvFwVersion', 'ucVersion']
+}

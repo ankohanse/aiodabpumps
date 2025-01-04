@@ -22,6 +22,7 @@ from .dabpumps_const import (
     DABPUMPS_API_TOKEN_COOKIE,
     DABPUMPS_API_TOKEN_TIME_MIN,
     API_LOGIN,
+    DEVICE_ATTR_EXTRA,
 )
 
 from .dabpumps_client import (
@@ -33,7 +34,7 @@ from .dabpumps_client import (
 _LOGGER = logging.getLogger(__name__)
 
 DabPumpsInstall = namedtuple('DabPumpsInstall', 'id, name, description, company, address, role, devices')
-DabPumpsDevice = namedtuple('DabPumpsDevice', 'id, serial, name, vendor, product, version, config_id, install_id')
+DabPumpsDevice = namedtuple('DabPumpsDevice', 'id, serial, name, vendor, product, hw_version, sw_version, mac_address, config_id, install_id')
 DabPumpsConfig = namedtuple('DabPumpsConfig', 'id, label, description, meta_params')
 DabPumpsParams = namedtuple('DabPumpsParams', 'key, type, unit, weight, values, min, max, family, group, view, change, log, report')
 DabPumpsStatus = namedtuple('DabPumpsStatus', 'serial, key, val')
@@ -421,12 +422,15 @@ class DabPumpsApi:
             device = DabPumpsDevice(
                 vendor = 'DAB Pumps',
                 name = dum_name,
-                id = dum_name,
+                id = self.create_id(dum_name),
                 serial = dum_serial,
                 product = dum_product,
-                version = dum_version,
+                hw_version = dum_version,
                 config_id = dum_config,
                 install_id = install_id,
+                # Attributes below are retrieved later on via async_fetch_device_details
+                sw_version = None,
+                mac_address = None,
             )
             device_map[dum_serial] = device
 
@@ -464,6 +468,43 @@ class DabPumpsApi:
             case DabPumpsRet.DATA: return device_map
             case DabPumpsRet.RAW: return raw
             case DabPumpsRet.BOTH: return (device_map, raw)
+
+
+    async def async_fetch_device_details(self, serial, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
+        """Fetch the extra details for a DAB Pumps device"""
+    
+        # Retrieve data via REST request
+        # This is actually the same data as used for statusses
+        if raw is None:
+            raw = await self.async_fetch_device_statusses(serial, raw=raw, ret=DabPumpsRet.RAW)
+        
+        # Process the resulting raw data
+        device = self._device_map[serial]
+        device_dict = device._asdict()
+        device_changed = False
+
+        # Search for specific statusses
+        for attr,keys in DEVICE_ATTR_EXTRA.items():
+            for key in keys:
+
+                # Try to find a status for this key and device
+                status = next( (status for status in self._status_map.values() if status.serial==serial and status.key==key), None)
+                
+                if status is not None and status.val is not None:
+                    # Found it. Update the device attribute (workaround via dict because it is a namedtuple)
+                    if getattr(device, attr) != status.val:
+                        _LOGGER.debug(f"Found extra device attribute {serial} {attr} = {status.val}")
+                        device_dict[attr] = status.val
+                        device_changed = True
+
+        if device_changed:
+            self._device_map[serial] = DabPumpsDevice(**device_dict)
+
+        # Return data or raw or both
+        match ret:
+            case DabPumpsRet.DATA: return self._device_map[serial]
+            case DabPumpsRet.RAW: return raw
+            case DabPumpsRet.BOTH: return (self._device_map[serial], raw)
 
 
     async def async_fetch_device_config(self, config_id, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):

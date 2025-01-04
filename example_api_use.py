@@ -11,6 +11,10 @@ logger = logging.getLogger(__name__)
 
 TEST_USERNAME = "fill in your DConnect username here"
 TEST_PASSWORD = "fill in your DConnect password here"
+#
+# Comment out the line below if username and password are set above
+from tests import TEST_USERNAME, TEST_PASSWORD
+
 
 async def main():
     api = None
@@ -32,22 +36,32 @@ async def main():
             device_map = await api.async_fetch_install_details(install_id)
             logger.info(f"devices: {len(device_map)}")
 
-            for device_serial, device in device_map.items():
+            for device_serial in device_map.keys():
+                device = await api.async_fetch_device_details(device_serial)
+
                 logger.info("")
                 logger.info(f"device: {device.name} ({device.serial})")                
+                for k,v in device._asdict().items():
+                    logger.info(f"    {k}: {v}")
                                 
                 # Retrieve device config details
                 config_id = device.config_id
                 config = await api.async_fetch_device_config(config_id)
-                #logger.info(f"device config: {config}")
+
+                logger.info("")
+                logger.info(f"config: {config.description} ({config.id})")
+                logger.info(f"    meta_params: {len(config.meta_params)}")             
+                for k,v in config.meta_params.items():
+                    logger.info(f"        {k}: {v}")
 
                 # Once the calls above have been perfomed, the call below can be repeated periodically
                 # Retrieve device statusses
                 status_map = await api.async_fetch_device_statusses(device_serial)
+                logger.info("")
                 logger.info(f"statusses: {len(status_map)}")
 
                 for k,v in status_map.items():
-                    logger.info(f"  {v.serial} - {v.key}: {v.val}")
+                    logger.info(f"    {v.key}: {v.val}")
 
     except Exception as e:
         logger.info(f"Unexpected exception: {e}")
