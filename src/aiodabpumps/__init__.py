@@ -6,10 +6,12 @@ from .dabpumps_api import (
     DabPumpsParams,
     DabPumpsStatus,
     DabPumpsApiAuthError, 
-    DabPumpsApiRightsError, 
+    DabPumpsApiRightsError,
+    DabPumpsApiDataError, 
     DabPumpsApiError, 
     DabPumpsApiHistoryItem, 
     DabPumpsApiHistoryDetail,
+    DabPumpsRet,
 )
 
 # for unit tests
