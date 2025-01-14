@@ -51,25 +51,26 @@ class DabPumpsApi:
     
     def __init__(self, username, password, client:httpx.AsyncClient|aiohttp.ClientSession|None = None):
         # Configuration
-        self._username = username
-        self._password = password
+        self._username: str = username
+        self._password: str = password
 
         # Retrieved data
-        self._login_method = None
-        self._install_map_ts = datetime.min
-        self._install_map = {}
-        self._device_map_ts = datetime.min
-        self._device_map = {}
-        self._config_map_ts = datetime.min
-        self._config_map = {}
-        self._status_map_ts = datetime.min
-        self._status_map = {}
-        self._string_map_ts = datetime.min
-        self._string_map_lang = None
-        self._string_map = {}
-        self._user_role_ts = datetime.min
-        self._user_role = 'CUSTOMER'
+        self._login_method: str|None = None
+        self._install_map: dict[str, DabPumpsInstall] = {}
+        self._device_map: dict[str, DabPumpsDevice] = {}
+        self._config_map: dict[str, DabPumpsConfig] = {}
+        self._status_map: dict[str, DabPumpsStatus] = {}
+        self._string_map: dict[str, str] = {}
+        self._string_map_lang: str = None
+        self._user_role: str = 'CUSTOMER'
 
+        self._install_map_ts: datetime = datetime.min
+        self._device_map_ts: datetime = datetime.min
+        self._device_detail_ts: datetime = datetime.min
+        self._config_map_ts: datetime = datetime.min
+        self._status_map_ts: datetime = datetime.min
+        self._string_map_ts: datetime = datetime.min
+        self._user_role_ts: datetime = datetime.min
 
         # Client (aiohttp or httpx) to keep track of cookies during login and subsequent calls
         # We keep the same client for the whole life of the api instance.
@@ -99,37 +100,65 @@ class DabPumpsApi:
     
     
     @property
-    def login_method(self):
+    def login_method(self) -> str:
         return self._login_method
     
     @property
-    def install_map(self):
+    def install_map(self) -> dict[str, DabPumpsInstall]:
         return self._install_map
     
     @property
-    def device_map(self):
+    def device_map(self) -> dict[str, DabPumpsDevice]:
         return self._device_map
     
     @property
-    def config_map(self):
+    def config_map(self) -> dict[str, DabPumpsConfig]:
         return self._config_map
     
     @property
-    def status_map(self):
+    def status_map(self) -> dict[str, DabPumpsStatus]:
         return self._status_map
     
     @property
-    def string_map(self):
+    def string_map(self) -> dict[str, str]:
         return self._string_map
     
     @property
-    def string_map_lang(self):
+    def string_map_lang(self) -> str:
         return self._string_map_lang
     
     @property
-    def user_role(self):
+    def user_role(self) -> str:
         return self._user_role
-        
+
+    @property
+    def install_map_ts(self) -> datetime:
+        return self._install_map_ts
+    
+    @property
+    def device_map_ts(self) -> datetime:
+        return self._device_map_ts
+    
+    @property
+    def device_detail_ts(self) -> datetime:
+        return self._device_detail_ts
+    
+    @property
+    def config_map_ts(self) -> datetime:
+        return self._config_map_ts
+    
+    @property
+    def status_map_ts(self) -> datetime:
+        return self._status_map_ts
+    
+    @property
+    def string_map_ts(self) -> datetime:
+        return self._string_map_ts
+    
+    @property
+    def user_role_ts(self) -> datetime:
+        return self._user_role_ts
+
 
     async def async_close(self):
         if self._client:
@@ -497,8 +526,11 @@ class DabPumpsApi:
                         device_dict[attr] = status.val
                         device_changed = True
 
+        # Remember/update the found device details
         if device_changed:
             self._device_map[serial] = DabPumpsDevice(**device_dict)
+
+        self._device_detail_ts = datetime.now()
 
         # Return data or raw or both
         match ret:
