@@ -22,6 +22,7 @@ from .dabpumps_const import (
     DABPUMPS_API_TOKEN_COOKIE,
     DABPUMPS_API_TOKEN_TIME_MIN,
     API_LOGIN,
+    DEVICE_ATTR_EXTRA,
     STATUS_UPDATE_HOLD,
 )
 
