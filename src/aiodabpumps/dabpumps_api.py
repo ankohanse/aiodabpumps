@@ -22,7 +22,7 @@ from .dabpumps_const import (
     DABPUMPS_API_TOKEN_COOKIE,
     DABPUMPS_API_TOKEN_TIME_MIN,
     API_LOGIN,
-    DEVICE_ATTR_EXTRA,
+    STATUS_UPDATE_HOLD,
 )
 
 from .dabpumps_client import (
@@ -37,7 +37,7 @@ DabPumpsInstall = namedtuple('DabPumpsInstall', 'id, name, description, company,
 DabPumpsDevice = namedtuple('DabPumpsDevice', 'id, serial, name, vendor, product, hw_version, sw_version, mac_address, config_id, install_id')
 DabPumpsConfig = namedtuple('DabPumpsConfig', 'id, label, description, meta_params')
 DabPumpsParams = namedtuple('DabPumpsParams', 'key, type, unit, weight, values, min, max, family, group, view, change, log, report')
-DabPumpsStatus = namedtuple('DabPumpsStatus', 'serial, key, val')
+DabPumpsStatus = namedtuple('DabPumpsStatus', 'serial, key, val, update_ts')
 
 class DabPumpsRet(Enum):
     NONE = 0
@@ -646,14 +646,25 @@ class DabPumpsApi:
             if item_val=='h':
                 continue
 
+            # Check if this item was recently updated in our current status_map
+            status_key = DabPumpsApi.create_id(serial, item_key)
+            item_old = self._status_map.get(status_key, None)
+
+            if item_old and \
+               item_old.update_ts is not None and \
+               (datetime.now() - item_old.update_ts).total_seconds() < STATUS_UPDATE_HOLD:
+
+                _LOGGER.debug(f"Skip refresh of recently updated status ({status_key})")
+                continue
+
             # Add it to our statusses
-            item = DabPumpsStatus(
+            item_new = DabPumpsStatus(
                 serial = serial,
                 key = item_key,
                 val = item_val,
+                update_ts = None,
             )
-            status_key = DabPumpsApi.create_id(serial, item_key)
-            status_map[status_key] = item
+            status_map[status_key] = item_new
 
         if len(status_map) == 0:
              raise DabPumpsApiDataError(f"No statusses found for '{serial}'")
@@ -688,7 +699,7 @@ class DabPumpsApi:
         _LOGGER.info(f"Set {serial}:{key} from {status.val} to {value}")
         
         # update the cached value in status_map
-        status = status._replace(val=value)
+        status = status._replace(val=value, update_ts=datetime.now())
         self._status_map[status_key] = status
         
         # Update data via REST request

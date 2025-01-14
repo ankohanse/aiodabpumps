@@ -204,18 +204,26 @@ async def test_set_data(name, key, val, exp_except, request):
     status = next( (status for status in context.api.status_map.values() if status.key==key), None)
     assert status is not None
 
-    await context.api.async_change_device_status(status.serial, status.key, val)
+    changed = await context.api.async_change_device_status(status.serial, status.key, val)
 
-    # Give backend a moment to process the update. Then retrieve changed value
-    for retry in range(10):
-        await asyncio.sleep(3)
+    # Do immediate test of changed value. 
+    # We hold the changed value while the backend is processing the change.
+    if changed:
         await context.api.async_fetch_device_statusses(status.serial)
 
         status = next( (status for status in context.api.status_map.values() if status.key==key), None)
-        if status.val == val:
-            break
+        assert status.val == val
+        assert status.update_ts is not None
 
+        # Wait until the backend has processed the change and test again
+        await asyncio.sleep(30)
+
+    # Test (either not changed or after change has been processed by backend)
+    await context.api.async_fetch_device_statusses(status.serial)
+
+    status = next( (status for status in context.api.status_map.values() if status.key==key), None)
     assert status.val == val
+    assert status.update_ts is None
 
 
 @pytest.mark.asyncio

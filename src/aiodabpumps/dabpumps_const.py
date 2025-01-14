@@ -16,6 +16,9 @@ API_LOGIN.DABLIVE_APP_1 = 'DabLive_app_1'
 API_LOGIN.DCONNECT_APP = 'DConnect_app'
 API_LOGIN.DCONNECT_WEB = 'DConnect_web'
 
+# Period to prevent status updates when value was recently updated
+STATUS_UPDATE_HOLD = 30 # seconds
+
 # Extra device attributes that are not in install info, but retrieved from statusses
 DEVICE_ATTR_EXTRA = {
     "mac_address": ['MacWlan'],
