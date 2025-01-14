@@ -89,7 +89,7 @@ async def test_login(name, usr, pwd, exp_except, request):
         ("data ok", None),
     ]
 )
-async def test_data(name, exp_except, request):
+async def test_get_data(name, exp_except, request):
     context = request.getfixturevalue("context")
     context.api = DabPumpsApi(TEST_USERNAME, TEST_PASSWORD)
 
@@ -164,6 +164,58 @@ async def test_data(name, exp_except, request):
         assert type(status) is DabPumpsStatus
         assert status.serial is not None
         assert status.key is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("context")
+@pytest.mark.parametrize(
+    "name, key, val, exp_except",
+    [
+        ("set PowerShowerBoost 30", "PowerShowerBoost", "30", None),
+        ("set PowerShowerBoost 20", "PowerShowerBoost", "20", None),
+        ("set PowerShowerDuration 360", "PowerShowerDuration", "360", None),
+        ("set PowerShowerDuration 300", "PowerShowerDuration", "300", None),
+        ("set SleepModeEnable on", "SleepModeEnable", "1", None),
+        ("set SleepModeEnable off", "SleepModeEnable", "0", None),
+    ]
+)
+async def test_set_data(name, key, val, exp_except, request):
+    context = request.getfixturevalue("context")
+    context.api = DabPumpsApi(TEST_USERNAME, TEST_PASSWORD)
+
+    # Login
+    await context.api.async_login()
+
+    # Get install list
+    await context.api.async_fetch_install_list()
+
+    assert context.api.install_map is not None
+    assert type(context.api.install_map) is dict
+    assert len(context.api.install_map) > 0
+
+    # Get install details
+    for install_id in context.api.install_map:
+        await context.api.async_fetch_install_details(install_id)
+
+    # Get device statusses
+    for device_serial in context.api.device_map:
+        await context.api.async_fetch_device_statusses(device_serial)
+
+    status = next( (status for status in context.api.status_map.values() if status.key==key), None)
+    assert status is not None
+
+    await context.api.async_change_device_status(status.serial, status.key, val)
+
+    # Give backend a moment to process the update. Then retrieve changed value
+    for retry in range(10):
+        await asyncio.sleep(3)
+        await context.api.async_fetch_device_statusses(status.serial)
+
+        status = next( (status for status in context.api.status_map.values() if status.key==key), None)
+        if status.val == val:
+            break
+
+    assert status.val == val
 
 
 @pytest.mark.asyncio
