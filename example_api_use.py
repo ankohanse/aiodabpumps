@@ -23,31 +23,33 @@ async def main():
         api = DabPumpsApi(TEST_USERNAME, TEST_PASSWORD)
         await api.async_login()
 
-        # Retrieve installations accessible by this user
-        install_map = await api.async_fetch_install_list()
+        # Retrieve translations (optional)
+        await api.async_fetch_strings('en')
 
-        logger.info(f"installs: {len(install_map)}")
+        # Retrieve installations accessible by this user.
+        # Usually only one and you can skip this call if you already know the install_id
+        await api.async_fetch_install_list()
 
-        for install_id, install in install_map.items():
+        logger.info(f"installs: {len(api.install_map)}")
+
+        for install_id, install in api.install_map.items():
             logger.info("")
             logger.info(f"installation: {install.name} ({install.id})")
 
             # Retrieve installation details
-            device_map = await api.async_fetch_install_details(install_id)
-            logger.info(f"devices: {len(device_map)}")
+            # This includes the list of devices and configuration meta data for each device
+            await api.async_fetch_install(install_id)
 
-            for device_serial in device_map.keys():
-                device = await api.async_fetch_device_details(device_serial)
+            logger.info(f"devices: {len(api.device_map)}")
 
+            for device in api.device_map.values():
+                # Log the retrieved info
                 logger.info("")
                 logger.info(f"device: {device.name} ({device.serial})")                
                 for k,v in device._asdict().items():
                     logger.info(f"    {k}: {v}")
-                                
-                # Retrieve device config details
-                config_id = device.config_id
-                config = await api.async_fetch_device_config(config_id)
 
+                config = api.config_map[device.config_id]                     
                 logger.info("")
                 logger.info(f"config: {config.description} ({config.id})")
                 logger.info(f"    meta_params: {len(config.meta_params)}")             
@@ -56,12 +58,17 @@ async def main():
 
                 # Once the calls above have been perfomed, the call below can be repeated periodically
                 # Retrieve device statusses
-                status_map = await api.async_fetch_device_statusses(device_serial)
+                await api.async_fetch_device_statusses(device.serial)
                 logger.info("")
-                logger.info(f"statusses: {len(status_map)}")
+                logger.info(f"statusses: {len(api.status_map)}")
 
-                for k,v in status_map.items():
-                    logger.info(f"    {v.key}: {v.val}")
+                for k,v in api.status_map.items():
+                    value_with_unit = f"{v.value} {v.unit}" if v.unit is not None else v.value
+
+                    if (v.value != v.code):
+                        logger.info(f"    {v.key}: {value_with_unit} ('{v.code}')")
+                    else:
+                        logger.info(f"    {v.key}: {value_with_unit}")
 
     except Exception as e:
         logger.info(f"Unexpected exception: {e}")

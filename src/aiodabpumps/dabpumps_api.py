@@ -1,5 +1,7 @@
 """api.py: DabPumps API for DAB Pumps integration."""
 
+import copy
+import math
 import aiohttp
 import httpx
 import json
@@ -38,7 +40,7 @@ DabPumpsInstall = namedtuple('DabPumpsInstall', 'id, name, description, company,
 DabPumpsDevice = namedtuple('DabPumpsDevice', 'id, serial, name, vendor, product, hw_version, sw_version, mac_address, config_id, install_id')
 DabPumpsConfig = namedtuple('DabPumpsConfig', 'id, label, description, meta_params')
 DabPumpsParams = namedtuple('DabPumpsParams', 'key, type, unit, weight, values, min, max, family, group, view, change, log, report')
-DabPumpsStatus = namedtuple('DabPumpsStatus', 'serial, key, val, update_ts')
+DabPumpsStatus = namedtuple('DabPumpsStatus', 'serial, key, code, value, unit, update_ts')
 
 class DabPumpsRet(Enum):
     NONE = 0
@@ -412,7 +414,24 @@ class DabPumpsApi:
             case DabPumpsRet.BOTH: return (install_map, raw)
 
 
-    async def async_fetch_install_details(self, install_id, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
+    async def async_fetch_install(self, install_id: str):
+        """
+        Fetch all details from an installation.
+        Includes list of devices, and config meta data for each device
+        """
+
+        # Retrieve list of devices within this install
+        await self.async_fetch_install_details(install_id)
+
+        for device in self._device_map.values():
+                # First retrieve device config
+                await self.async_fetch_device_config(device.config_id)
+
+                # Then retrieve device details
+                await self.async_fetch_device_details(device.serial)
+
+
+    async def async_fetch_install_details(self, install_id: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
         """Get installation details"""
 
         # Retrieve data via REST request
@@ -500,8 +519,12 @@ class DabPumpsApi:
             case DabPumpsRet.BOTH: return (device_map, raw)
 
 
-    async def async_fetch_device_details(self, serial, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
-        """Fetch the extra details for a DAB Pumps device"""
+    async def async_fetch_device_details(self, serial: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
+        """
+        Fetch the extra details for a DAB Pumps device
+
+        This function should be run AFTER async_fetch_device_config
+        """
     
         # Retrieve data via REST request
         # This is actually the same data as used for statusses
@@ -520,11 +543,11 @@ class DabPumpsApi:
                 # Try to find a status for this key and device
                 status = next( (status for status in self._status_map.values() if status.serial==serial and status.key==key), None)
                 
-                if status is not None and status.val is not None:
+                if status is not None and status.value is not None:
                     # Found it. Update the device attribute (workaround via dict because it is a namedtuple)
-                    if getattr(device, attr) != status.val:
-                        _LOGGER.debug(f"Found extra device attribute {serial} {attr} = {status.val}")
-                        device_dict[attr] = status.val
+                    if getattr(device, attr) != status.value:
+                        _LOGGER.debug(f"Found extra device attribute {serial} {attr} = {status.value}")
+                        device_dict[attr] = status.value
                         device_changed = True
 
         # Remember/update the found device details
@@ -540,7 +563,7 @@ class DabPumpsApi:
             case DabPumpsRet.BOTH: return (self._device_map[serial], raw)
 
 
-    async def async_fetch_device_config(self, config_id, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
+    async def async_fetch_device_config(self, config_id: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
         """Fetch the statusses for a DAB Pumps device, which then constitues the Sensors"""
 
         # Retrieve data via REST request
@@ -622,7 +645,7 @@ class DabPumpsApi:
             case DabPumpsRet.BOTH: return (config, raw)
         
         
-    async def async_fetch_device_statusses(self, serial, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
+    async def async_fetch_device_statusses(self, serial: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
         """Fetch the statusses for a DAB Pumps device, which then constitues the Sensors"""
     
         # Retrieve data via REST request
@@ -642,30 +665,35 @@ class DabPumpsApi:
         status = raw.get('status') or "{}"
         values = json.loads(status)
         
-        for item_key, item_val in values.items():
-            # the value 'h' is used when a property is not available/supported
-            if item_val=='h':
+        for item_key, item_code in values.items():
+            # the code 'h' is used when a property is not available/supported
+            if item_code=='h':
                 continue
 
             # Check if this item was recently updated in our current status_map
             status_key = DabPumpsApi.create_id(serial, item_key)
-            item_old = self._status_map.get(status_key, None)
+            status_old = self._status_map.get(status_key, None)
 
-            if item_old and \
-               item_old.update_ts is not None and \
-               (datetime.now() - item_old.update_ts).total_seconds() < STATUS_UPDATE_HOLD:
+            if status_old and \
+               status_old.update_ts is not None and \
+               (datetime.now() - status_old.update_ts).total_seconds() < STATUS_UPDATE_HOLD:
 
                 _LOGGER.debug(f"Skip refresh of recently updated status ({status_key})")
                 continue
 
+            # Resolve the coded value into the real world value
+            (item_val, item_unit) = self._decode_status_value(serial, item_key, item_code)
+
             # Add it to our statusses
-            item_new = DabPumpsStatus(
+            status_new = DabPumpsStatus(
                 serial = serial,
                 key = item_key,
-                val = item_val,
+                code = item_code,
+                value = item_val,
+                unit = item_unit,
                 update_ts = None,
             )
-            status_map[status_key] = item_new
+            status_map[status_key] = status_new
 
         if len(status_map) == 0:
              raise DabPumpsApiDataError(f"No statusses found for '{serial}'")
@@ -683,24 +711,41 @@ class DabPumpsApi:
             case DabPumpsRet.BOTH: return (status_map, raw)
         
         
-    async def async_change_device_status(self, serial, key, value):
-        """Set a new status value for a DAB Pumps device"""
+    async def async_change_device_status(self, serial: str, key: str, code: str|None=None, value: Any|None=None):
+        """
+        Set a new status value for a DAB Pumps device.
 
+        Either code (the value as expected by Dab Pumps backend) or value (the real world value)
+        needs to be supplied.
+        """
+
+        # Sanity check
+        if code is None and value is None:
+            
+            _LOGGER.warning(f"To change device status either 'code' or 'value' needs to be specified")
+            return False
+        
         status_key = DabPumpsApi.create_id(serial, key)  
 
         status = self._status_map.get(status_key)
         if not status:
             # Not found
             return False
+        
+        # If needed encode the value into what DabPumps backend expects
+        if code is None:
+            code = self._encode_status_value(serial, key, value)
+        else:
+            (value,_) = self._decode_status_value(serial, key, code)
             
-        if status.val == value:
+        if status.code == code:
             # Not changed
             return False
         
-        _LOGGER.info(f"Set {serial}:{key} from {status.val} to {value}")
+        _LOGGER.info(f"Set {serial}:{key} from {status.code} to {code}")
         
         # update the cached value in status_map
-        status = status._replace(val=value, update_ts=datetime.now())
+        status = status._replace(code=code, value=value, update_ts=datetime.now())
         self._status_map[status_key] = status
         
         # Update data via REST request
@@ -713,7 +758,7 @@ class DabPumpsApi:
             },
             "json": {
                 'key': status.key, 
-                'value': str(value) 
+                'value': status.code
             },
         }
         
@@ -724,7 +769,7 @@ class DabPumpsApi:
         return True
     
 
-    async def async_fetch_strings(self, lang, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
+    async def async_fetch_strings(self, lang: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
         """Get string translations"""
     
         # Retrieve data via REST request
@@ -760,6 +805,115 @@ class DabPumpsApi:
             case DabPumpsRet.RAW: return raw
             case DabPumpsRet.BOTH: return (string_map, raw)
 
+
+    def get_status_value(self, serial: str, key: str) -> DabPumpsStatus:
+        """
+        Resolve code, value and unit for a status
+        """
+        status_key = DabPumpsApi.create_id(serial, key)
+
+        return self._status_map.get(status_key, None)
+
+
+    def get_status_metadata(self, serial: str, key: str, translate:bool = True) -> DabPumpsParams:
+        """
+        Resolve meta params for a status
+        """
+
+        # Find the meta params for this status
+        device = self._device_map.get(serial, None) if self._device_map else None
+        config = self._config_map.get(device.config_id, None) if device is not None and self._config_map  else None
+        params = config.meta_params.get(key, None) if config is not None and config.meta_params else None
+
+        # Apply translations
+        if translate and params is not None and params.values is not None:
+            params_dict = params._asdict()
+            params_dict['values'] = { k:self.translate_string(v) for k,v in params.values.items() }
+            params = DabPumpsParams(**params_dict)
+
+        return params
+
+
+    def _decode_status_value(self, serial: str, key: str, code: str) -> Any:
+        """
+        Resolve the coded value into the real world value.
+        Also returns the unit of measurement.
+        """
+
+        # Find the meta params for this status
+        params = self.get_status_metadata(serial, key, translate=False)
+
+        if params is None or code is None:
+            return (code, '')
+        
+        # param:DabPumpsParam - 'key, type, unit, weight, values, min, max, family, group, view, change, log, report'
+        match params.type:
+            case 'enum':
+                value = self.translate_string(params.values.get(code, code))
+
+            case 'measure':
+                if params.weight and params.weight != 1 and params.weight != 0:
+                    # Convert to float
+                    precision = int(math.floor(math.log10(1.0 / params.weight)))
+                    value = round(float(code) * params.weight, precision)
+                else:
+                    # Convert to int
+                    value = int(code)
+                    
+            case 'label':
+                value = self.translate_string(str(code))
+
+            case _:
+                _LOGGER.warning(f"Encountered an unknown params type '{params.type}' for '{serial}:{params.key}'. Please contact the integration developer to have this resolved.")
+                value = None
+
+        return (value, params.unit)
+
+
+    def _encode_status_value(self, serial: str, key: str, value: Any) -> Any:
+        """
+        Resolve the real world value into the coded value.
+        """
+
+        # Find the meta params for this status
+        device = self._device_map.get(serial, None) if self._device_map else None
+        config = self._config_map.get(device.config_id, None) if device is not None and self._config_map  else None
+        params = config.meta_params.get(key, None) if config is not None and config.meta_params else None
+
+        if params is None or value is None:
+            return str(value)
+        
+        # param:DabPumpsParam - 'key, type, unit, weight, values, min, max, family, group, view, change, log, report'
+        match params.type:
+            case 'enum':
+                code = next( (str(k) for k,v in params.values.items() if v==value), None)
+                if code is None:
+                    code = str(value)
+
+            case 'measure':
+                if params.weight and params.weight != 1 and params.weight != 0:
+                    # Convert from float to int
+                    code = str(int(round(value / params.weight)))
+                else:
+                    # Convert to int
+                    code = str(int(value))
+                    
+            case 'label':
+                code = str(value)
+
+            case _:
+                _LOGGER.warning(f"Encountered an unknown params type '{params.type}' for '{serial}:{params.key}'. Please contact the integration developer to have this resolved.")
+                code = None
+        
+        return code
+    
+
+    def translate_string(self, str: str) -> str:
+        """
+        Return 'translated' string or original string if not found
+        """
+        return self._string_map.get(str, str) if self._string_map else str
+    
 
     async def _async_send_request(self, context, request):
         """GET or POST a request for JSON data"""
