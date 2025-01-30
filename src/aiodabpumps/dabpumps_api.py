@@ -849,6 +849,7 @@ class DabPumpsApi:
         # param:DabPumpsParam - 'key, type, unit, weight, values, min, max, family, group, view, change, log, report'
         match params.type:
             case 'enum':
+                # Lookup value and translate
                 value = self.translate_string(params.values.get(code, code))
 
             case 'measure':
@@ -861,7 +862,8 @@ class DabPumpsApi:
                     value = int(code)
                     
             case 'label':
-                value = self.translate_string(str(code))
+                # Convert to string; no translation
+                value = str(code)
 
             case _:
                 _LOGGER.warning(f"Encountered an unknown params type '{params.type}' for '{serial}:{params.key}'. Please contact the integration developer to have this resolved.")
@@ -899,6 +901,7 @@ class DabPumpsApi:
                     code = str(int(value))
                     
             case 'label':
+                # Convert to string
                 code = str(value)
 
             case _:

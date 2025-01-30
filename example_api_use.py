@@ -24,6 +24,19 @@ async def main():
         await api.async_login()
 
         # Retrieve translations (optional)
+        # Possible languages:
+        #    "cs": "Czech",
+        #    "nl": "Dutch",
+        #    "en": "English",
+        #    "fr": "French",
+        #    "de": "German",
+        #    "it": "Italian",
+        #    "pl": "Polish",
+        #    "ro": "Romanian",
+        #    "ru": "Russian",
+        #    "sk": "Slovenian",
+        #    "es": "Spanish",
+        #    "sf": "Swedish",
         await api.async_fetch_strings('en')
 
         # Retrieve installations accessible by this user.

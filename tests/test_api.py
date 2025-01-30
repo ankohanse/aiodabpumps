@@ -317,29 +317,33 @@ async def string_map():
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("context", "device_map", "config_map")
+@pytest.mark.usefixtures("context", "device_map", "config_map", "string_map")
 @pytest.mark.parametrize(
-    "name, serial, key, code, exp_value",
+    "name, serial, key, translate, code, exp_value",
     [
-        ("device unknown", 'SERIAL_XX', 'KEY_ENUM', '2', ('2', '')),
-        ("key unknown", 'SERIAL', 'KEY_XX', '2', ('2', '')),
-        ("enum ok", "SERIAL", 'KEY_ENUM', '2', ('two', None)),
-        ("enum no", "SERIAL", 'KEY_ENUM', '4', ('4', None)),
-        ("float ok", "SERIAL", 'KEY_FLOAT', '2', (0.2, 'F')),
-        ("float min", "SERIAL", 'KEY_FLOAT', '-1', (-0.1, 'F')),
-        ("float max", "SERIAL", 'KEY_FLOAT', '11', (1.1, 'F')),
-        ("int ok", "SERIAL", 'KEY_INT', '2', (2, 'I')),
-        ("int min", "SERIAL", 'KEY_INT', '-1', (-1, 'I')),
-        ("int max", "SERIAL", 'KEY_INT', '11', (11, 'I')),
-        ("label ok", "SERIAL", 'KEY_LABEL', 'ABC', ('ABC', '')),
+        ("device unknown", 'SERIAL_XX', 'KEY_ENUM', True, '2', ('2', '')),
+        ("key unknown", 'SERIAL', 'KEY_XX', True, '2', ('2', '')),
+        ("enum ok", "SERIAL", 'KEY_ENUM', False, '2', ('two', None)),
+        ("enum ok", "SERIAL", 'KEY_ENUM', True, '2', ('twee', None)),
+        ("enum no", "SERIAL", 'KEY_ENUM', False, '4', ('4', None)),
+        ("enum no", "SERIAL", 'KEY_ENUM', True, '4', ('4', None)),
+        ("float ok", "SERIAL", 'KEY_FLOAT', True, '2', (0.2, 'F')),
+        ("float min", "SERIAL", 'KEY_FLOAT', True, '-1', (-0.1, 'F')),
+        ("float max", "SERIAL", 'KEY_FLOAT', True, '11', (1.1, 'F')),
+        ("int ok", "SERIAL", 'KEY_INT', True, '2', (2, 'I')),
+        ("int min", "SERIAL", 'KEY_INT', True, '-1', (-1, 'I')),
+        ("int max", "SERIAL", 'KEY_INT', True, '11', (11, 'I')),
+        ("label ok", "SERIAL", 'KEY_LABEL', True, 'ABC', ('ABC', '')),
     ]
 )
-async def test_decode(name, serial, key, code, exp_value, request):
+async def test_decode(name, serial, key, translate, code, exp_value, request):
     context = request.getfixturevalue("context")
     context.api = DabPumpsApi("dummy_usr", "wrong_pwd") # no login needed
 
     context.api._device_map = request.getfixturevalue("device_map")
     context.api._config_map = request.getfixturevalue("config_map")
+    if translate:
+        context.api._string_map = request.getfixturevalue("string_map")
 
     value = context.api._decode_status_value(serial, key, code)
     assert value == exp_value
