@@ -742,7 +742,7 @@ class DabPumpsApi:
             # Not changed
             return False
         
-        _LOGGER.info(f"Set {serial}:{key} from {status.code} to {code}")
+        _LOGGER.info(f"Set {serial}:{key} from {status.value} to {value} ({code})")
         
         # update the cached value in status_map
         status = status._replace(code=code, value=value, update_ts=datetime.now())
@@ -812,6 +812,7 @@ class DabPumpsApi:
         """
         status_key = DabPumpsApi.create_id(serial, key)
 
+        # Return status for this key; decoding and translation of code into value is already done.
         return self._status_map.get(status_key, None)
 
 

@@ -79,8 +79,10 @@ async def main():
                     value_with_unit = f"{v.value} {v.unit}" if v.unit is not None else v.value
 
                     if (v.value != v.code):
+                        # Display real-life value and original encoded value
                         logger.info(f"    {v.key}: {value_with_unit} ('{v.code}')")
                     else:
+                        # Display real-life value, original encoded value is the same
                         logger.info(f"    {v.key}: {value_with_unit}")
 
     except Exception as e:
