@@ -170,6 +170,7 @@ async def test_get_data(name, exp_except, request):
         ("set PowerShowerDuration 300", "PowerShowerDuration", "300", None),
         ("set SleepModeEnable on", "SleepModeEnable", "1", None),
         ("set SleepModeEnable off", "SleepModeEnable", "0", None),
+        # ("set RF_EraseHistoricalFault", "RF_EraseHistoricalFault", "1", None),
     ]
 )
 async def test_set_data(name, key, code, exp_except, request):

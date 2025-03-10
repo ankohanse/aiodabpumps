@@ -62,7 +62,8 @@ class DabPumpsApi:
         self._install_map: dict[str, DabPumpsInstall] = {}
         self._device_map: dict[str, DabPumpsDevice] = {}
         self._config_map: dict[str, DabPumpsConfig] = {}
-        self._status_map: dict[str, DabPumpsStatus] = {}
+        self._status_actual_map: dict[str, DabPumpsStatus] = {}
+        self._status_static_map: dict[str, DabPumpsStatus] = {}
         self._string_map: dict[str, str] = {}
         self._string_map_lang: str = None
         self._user_role: str = 'CUSTOMER'
@@ -71,7 +72,8 @@ class DabPumpsApi:
         self._device_map_ts: datetime = datetime.min
         self._device_detail_ts: datetime = datetime.min
         self._config_map_ts: datetime = datetime.min
-        self._status_map_ts: datetime = datetime.min
+        self._status_actual_map_ts: datetime = datetime.min
+        self._status_static_map_ts: datetime = datetime.min
         self._string_map_ts: datetime = datetime.min
         self._user_role_ts: datetime = datetime.min
 
@@ -120,7 +122,7 @@ class DabPumpsApi:
     
     @property
     def status_map(self) -> dict[str, DabPumpsStatus]:
-        return self._status_map
+        return self._status_static_map | self._status_actual_map
     
     @property
     def string_map(self) -> dict[str, str]:
@@ -152,7 +154,7 @@ class DabPumpsApi:
     
     @property
     def status_map_ts(self) -> datetime:
-        return self._status_map_ts
+        return max( [self._status_static_map_ts, self._status_actual_map_ts] )
     
     @property
     def string_map_ts(self) -> datetime:
@@ -497,7 +499,8 @@ class DabPumpsApi:
 
         # Cleanup device config and device statusses to only keep values that are still part of a device in this installation
         config_map = { k: v for k, v in self._config_map.items() if v.id in config_list }
-        status_map = { k: v for k, v in self._status_map.items() if v.serial in serial_list }
+        status_actual_map = { k: v for k, v in self._status_actual_map.items() if v.serial in serial_list }
+        status_static_map = { k: v for k, v in self._status_static_map.items() if v.serial in serial_list }
 
         # Sanity check. # Never overwrite a known device_map, config_map or status_map with empty lists
         if len(device_map) == 0:
@@ -507,7 +510,8 @@ class DabPumpsApi:
         self._device_map_ts = datetime.now()
         self._device_map = device_map
         self._config_map = config_map
-        self._status_map = status_map
+        self._status_actual_map = status_actual_map
+        self._status_static_map = status_static_map
 
         self._user_role_ts = datetime.now()
         self._user_role = user_role
@@ -541,7 +545,7 @@ class DabPumpsApi:
             for key in keys:
 
                 # Try to find a status for this key and device
-                status = next( (status for status in self._status_map.values() if status.serial==serial and status.key==key), None)
+                status = next( (status for status in self._status_actual_map.values() if status.serial==serial and status.key==key), None)
                 
                 if status is not None and status.value is not None:
                     # Found it. Update the device attribute (workaround via dict because it is a namedtuple)
@@ -646,7 +650,65 @@ class DabPumpsApi:
         
         
     async def async_fetch_device_statusses(self, serial: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
-        """Fetch the statusses for a DAB Pumps device, which then constitues the Sensors"""
+        """Fetch the statusses for a DAB Pumps device"""
+
+        # also re-generate static statusses for this device serial
+        await self._async_fetch_static_statusses(serial)
+
+        return await self._async_fetch_device_statusses(serial, raw, ret)
+
+
+    async def _async_fetch_static_statusses(self, serial: str):
+        """Fetch the static statusses for a DAB Pumps device"""
+
+        if self._status_static_map_ts > max([self._device_map_ts, self._config_map_ts]):
+            # No change in base data, no need to recalculate
+            return
+        
+        # Process the resulting raw data
+        status_map = {}
+
+        device = self._device_map.get(serial, None)
+        if not device:
+            return
+
+        config = self._config_map.get(device.config_id)
+        if not config or not config.meta_params:
+            return
+
+        for params in config.meta_params.values():
+            is_static = False
+            code = None
+            value = ""
+
+            # Detect 'button' params (type 'enum' with only one possible value)
+            if params.type == 'enum' and len(params.values or []) == 1:
+                is_static = True
+                code = params.min if params.min is not None else "0"
+                value = ""
+
+            # Add other static params types here in future
+            pass
+
+            if is_static:
+                status_key = DabPumpsApi.create_id(device.serial, params.key)
+                status_new = DabPumpsStatus(
+                    serial = device.serial,
+                    key = params.key,
+                    code = code,
+                    value = value,
+                    unit = params.unit,
+                    update_ts = None,
+                )
+                status_map[status_key] = status_new 
+
+        # Merge with statusses from other devices
+        self._status_static_map_ts = datetime.now()
+        self._status_static_map.update(status_map)
+        
+        
+    async def _async_fetch_device_statusses(self, serial: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
+        """Fetch the statusses for a DAB Pumps device"""
     
         # Retrieve data via REST request
         if raw is None:
@@ -672,7 +734,7 @@ class DabPumpsApi:
 
             # Check if this item was recently updated in our current status_map
             status_key = DabPumpsApi.create_id(serial, item_key)
-            status_old = self._status_map.get(status_key, None)
+            status_old = self._status_actual_map.get(status_key, None)
 
             if status_old and \
                status_old.update_ts is not None and \
@@ -701,8 +763,8 @@ class DabPumpsApi:
         _LOGGER.debug(f"DAB Pumps statusses found for '{serial}' with {len(status_map)} values")
 
         # Merge with statusses from other devices
-        self._status_map_ts = datetime.now()
-        self._status_map.update(status_map)
+        self._status_actual_map_ts = datetime.now()
+        self._status_actual_map.update(status_map)
 
         # Return data or raw or both
         match ret:
@@ -727,7 +789,7 @@ class DabPumpsApi:
         
         status_key = DabPumpsApi.create_id(serial, key)  
 
-        status = self._status_map.get(status_key)
+        status = self._status_actual_map.get(status_key, None) or self._status_static_map.get(status_key, None)
         if not status:
             # Not found
             return False
@@ -746,7 +808,7 @@ class DabPumpsApi:
         
         # update the cached value in status_map
         status = status._replace(code=code, value=value, update_ts=datetime.now())
-        self._status_map[status_key] = status
+        self._status_actual_map[status_key] = status
         
         # Update data via REST request
         context = f"set {status.serial}:{status.key}"
@@ -813,7 +875,7 @@ class DabPumpsApi:
         status_key = DabPumpsApi.create_id(serial, key)
 
         # Return status for this key; decoding and translation of code into value is already done.
-        return self._status_map.get(status_key, None)
+        return self._status_actual_map.get(status_key, None) or self._status_static_map.get(status_key, None)
 
 
     def get_status_metadata(self, serial: str, key: str, translate:bool = True) -> DabPumpsParams:
