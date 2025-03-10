@@ -661,11 +661,23 @@ class DabPumpsApi:
     async def _async_fetch_static_statusses(self, serial: str):
         """Fetch the static statusses for a DAB Pumps device"""
 
+        # Check for static statusses that have been modified
+        for status_key in self._status_static_map.keys():
+
+            # Does this static status have a related actual/modified status?
+            status_mod = self._status_actual_map.get(status_key, None)
+            if status_mod and \
+               status_mod.update_ts is not None and \
+               (datetime.now() - status_mod.update_ts).total_seconds() > STATUS_UPDATE_HOLD:
+                
+                # Remove the actual/modified value
+                self._status_actual_map.pop(status_key, None)
+
+        # When there is no change in base data, then there is no need to recalculate
         if self._status_static_map_ts > max([self._device_map_ts, self._config_map_ts]):
-            # No change in base data, no need to recalculate
             return
         
-        # Process the resulting raw data
+        # Process the existing data
         status_map = {}
 
         device = self._device_map.get(serial, None)
@@ -684,7 +696,7 @@ class DabPumpsApi:
             # Detect 'button' params (type 'enum' with only one possible value)
             if params.type == 'enum' and len(params.values or []) == 1:
                 is_static = True
-                code = params.min if params.min is not None else "0"
+                code = str(params.min) if params.min is not None else "0"
                 value = ""
 
             # Add other static params types here in future

@@ -162,18 +162,18 @@ async def test_get_data(name, exp_except, request):
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("context")
 @pytest.mark.parametrize(
-    "name, key, code, exp_except",
+    "name, key, code, exp_code, exp_except",
     [
-        ("set PowerShowerBoost 30", "PowerShowerBoost", "30", None),
-        ("set PowerShowerBoost 20", "PowerShowerBoost", "20", None),
-        ("set PowerShowerDuration 360", "PowerShowerDuration", "360", None),
-        ("set PowerShowerDuration 300", "PowerShowerDuration", "300", None),
-        ("set SleepModeEnable on", "SleepModeEnable", "1", None),
-        ("set SleepModeEnable off", "SleepModeEnable", "0", None),
-        # ("set RF_EraseHistoricalFault", "RF_EraseHistoricalFault", "1", None),
+        ("set PowerShowerBoost 30", "PowerShowerBoost", "30", "30", None),
+        ("set PowerShowerBoost 20", "PowerShowerBoost", "20", "20", None),
+        ("set PowerShowerDuration 360", "PowerShowerDuration", "360", "360", None),
+        ("set PowerShowerDuration 300", "PowerShowerDuration", "300", "300", None),
+        ("set SleepModeEnable on", "SleepModeEnable", "1", "1", None),
+        ("set SleepModeEnable off", "SleepModeEnable", "0", "0", None),
+        ("set RF_EraseHistoricalFault", "RF_EraseHistoricalFault", "1", "0", None), # Falls back to 0 after STATUS_UPDATE_HOLD
     ]
 )
-async def test_set_data(name, key, code, exp_except, request):
+async def test_set_data(name, key, code, exp_code, exp_except, request):
     context = request.getfixturevalue("context")
     context.api = DabPumpsApi(TEST_USERNAME, TEST_PASSWORD)
 
@@ -216,7 +216,7 @@ async def test_set_data(name, key, code, exp_except, request):
     await context.api.async_fetch_device_statusses(status.serial)
 
     status = next( (status for status in context.api.status_map.values() if status.key==key), None)
-    assert status.code == code
+    assert status.code == exp_code
     assert status.update_ts is None
 
 
@@ -402,7 +402,8 @@ async def test_status(name, serial, key, exp_code, exp_value, exp_unit, request)
 
     context.api._device_map = request.getfixturevalue("device_map")
     context.api._config_map = request.getfixturevalue("config_map")
-    context.api._status_map = request.getfixturevalue("status_map")
+    context.api._status_actual_map = request.getfixturevalue("status_map")
+    context.api._status_static_map = {}
     context.api._string_map = request.getfixturevalue("string_map")
 
     status = context.api.get_status_value(serial, key)
@@ -438,7 +439,8 @@ async def test_metadata(name, serial, key, translate, exp_type, exp_values, exp_
 
     context.api._device_map = request.getfixturevalue("device_map")
     context.api._config_map = request.getfixturevalue("config_map")
-    context.api._status_map = request.getfixturevalue("status_map")
+    context.api._status_actual_map = request.getfixturevalue("status_map")
+    context.api._status_static_map = {}
     context.api._string_map = request.getfixturevalue("string_map")
 
     params = context.api.get_status_metadata(serial, key, translate=translate)
