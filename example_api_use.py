@@ -66,24 +66,26 @@ async def main():
                 logger.info("")
                 logger.info(f"config: {config.description} ({config.id})")
                 logger.info(f"    meta_params: {len(config.meta_params)}")             
-                for k,v in config.meta_params.items():
-                    logger.info(f"        {k}: {v}")
+                #for k,v in config.meta_params.items():
+                #    logger.info(f"        {k}: {v}")
 
                 # Once the calls above have been perfomed, the call below can be repeated periodically
                 # Retrieve device statusses
                 await api.async_fetch_device_statusses(device.serial)
-                logger.info("")
-                logger.info(f"statusses: {len(api.status_map)}")
 
-                for k,v in api.status_map.items():
+                device_statusses = { k:v for k,v in api.status_map.items() if v.serial==device.serial }
+                logger.info("")
+                logger.info(f"    statusses: {len(device_statusses)}")
+
+                for k,v in device_statusses.items():
                     value_with_unit = f"{v.value} {v.unit}" if v.unit is not None else v.value
 
                     if (v.value != v.code):
                         # Display real-life value and original encoded value
-                        logger.info(f"    {v.key}: {value_with_unit} ('{v.code}')")
+                        logger.info(f"        {v.key}: {value_with_unit} ('{v.code}')")
                     else:
                         # Display real-life value, original encoded value is the same
-                        logger.info(f"    {v.key}: {value_with_unit}")
+                        logger.info(f"        {v.key}: {value_with_unit}")
 
     except Exception as e:
         logger.info(f"Unexpected exception: {e}")

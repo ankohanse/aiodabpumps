@@ -655,7 +655,13 @@ class DabPumpsApi:
         # also re-generate static statusses for this device serial
         await self._async_fetch_static_statusses(serial)
 
-        return await self._async_fetch_device_statusses(serial, raw, ret)
+        (data, raw) = await self._async_fetch_device_statusses(serial, raw, ret=DabPumpsRet.BOTH)
+
+        # Return data or raw or both
+        match ret:
+            case DabPumpsRet.DATA: return self.status_map
+            case DabPumpsRet.RAW: return raw
+            case DabPumpsRet.BOTH: return (self.status_map, raw)
 
 
     async def _async_fetch_static_statusses(self, serial: str):
@@ -673,10 +679,6 @@ class DabPumpsApi:
                 # Remove the actual/modified value
                 self._status_actual_map.pop(status_key, None)
 
-        # When there is no change in base data, then there is no need to recalculate
-        if self._status_static_map_ts > max([self._device_map_ts, self._config_map_ts]):
-            return
-        
         # Process the existing data
         status_map = {}
 
