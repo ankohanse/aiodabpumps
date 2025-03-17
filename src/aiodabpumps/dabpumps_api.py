@@ -11,7 +11,7 @@ import re
 import time
 
 from collections import namedtuple
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from yarl import URL
@@ -40,7 +40,7 @@ DabPumpsInstall = namedtuple('DabPumpsInstall', 'id, name, description, company,
 DabPumpsDevice = namedtuple('DabPumpsDevice', 'id, serial, name, vendor, product, hw_version, sw_version, mac_address, config_id, install_id')
 DabPumpsConfig = namedtuple('DabPumpsConfig', 'id, label, description, meta_params')
 DabPumpsParams = namedtuple('DabPumpsParams', 'key, type, unit, weight, values, min, max, family, group, view, change, log, report')
-DabPumpsStatus = namedtuple('DabPumpsStatus', 'serial, key, code, value, unit, update_ts')
+DabPumpsStatus = namedtuple('DabPumpsStatus', 'serial, key, code, value, unit, status_ts, update_ts')
 
 class DabPumpsRet(Enum):
     NONE = 0
@@ -674,7 +674,7 @@ class DabPumpsApi:
             status_mod = self._status_actual_map.get(status_key, None)
             if status_mod and \
                status_mod.update_ts is not None and \
-               (datetime.now() - status_mod.update_ts).total_seconds() > STATUS_UPDATE_HOLD:
+               (datetime.now(timezone.utc) - status_mod.update_ts).total_seconds() > STATUS_UPDATE_HOLD:
                 
                 # Remove the actual/modified value
                 self._status_actual_map.pop(status_key, None)
@@ -712,6 +712,7 @@ class DabPumpsApi:
                     code = code,
                     value = value,
                     unit = params.unit,
+                    status_ts = datetime.now(timezone.utc),
                     update_ts = None,
                 )
                 status_map[status_key] = status_new 
@@ -740,7 +741,10 @@ class DabPumpsApi:
         status_map = {}
         status = raw.get('status') or "{}"
         values = json.loads(status)
-        
+
+        statusts = raw.get('statusts') or ""
+        status_ts = datetime.fromisoformat(statusts) if statusts else datetime.now(timezone.utc)
+
         for item_key, item_code in values.items():
             # the code 'h' is used when a property is not available/supported
             if item_code=='h':
@@ -752,7 +756,7 @@ class DabPumpsApi:
 
             if status_old and \
                status_old.update_ts is not None and \
-               (datetime.now() - status_old.update_ts).total_seconds() < STATUS_UPDATE_HOLD:
+               (datetime.now(timezone.utc) - status_old.update_ts).total_seconds() < STATUS_UPDATE_HOLD:
 
                 _LOGGER.debug(f"Skip refresh of recently updated status ({status_key})")
                 continue
@@ -767,6 +771,7 @@ class DabPumpsApi:
                 code = item_code,
                 value = item_val,
                 unit = item_unit,
+                status_ts = status_ts,
                 update_ts = None,
             )
             status_map[status_key] = status_new
@@ -821,7 +826,7 @@ class DabPumpsApi:
         _LOGGER.info(f"Set {serial}:{key} from {status.value} to {value} ({code})")
         
         # update the cached value in status_map
-        status = status._replace(code=code, value=value, update_ts=datetime.now())
+        status = status._replace(code=code, value=value, update_ts=datetime.now(timezone.utc))
         self._status_actual_map[status_key] = status
         
         # Update data via REST request
