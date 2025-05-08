@@ -164,6 +164,12 @@ class DabPumpsApi:
     def user_role_ts(self) -> datetime:
         return self._user_role_ts
 
+    @property
+    def closed(self) -> bool:
+        if self._client:
+            return self._client.closed
+        else:
+            return True
 
     async def async_close(self):
         if self._client:

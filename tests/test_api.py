@@ -31,6 +31,7 @@ class TestContext:
         if self.api:
             await self.api.async_logout()
             await self.api.async_close()
+            assert context.api.closed == True
 
 
 @pytest_asyncio.fixture
@@ -58,6 +59,7 @@ async def test_login(name, usr, pwd, exp_except, request):
     assert context.api is None
 
     context.api = DabPumpsApi(usr, pwd)
+    assert context.api.closed == False
 
     if exp_except is None:
         assert context.api.login_method is None
@@ -92,6 +94,7 @@ async def test_login(name, usr, pwd, exp_except, request):
 async def test_get_data(name, exp_except, request):
     context = request.getfixturevalue("context")
     context.api = DabPumpsApi(TEST_USERNAME, TEST_PASSWORD)
+    assert context.api.closed == False
 
     # Login
     await context.api.async_login()
@@ -176,6 +179,7 @@ async def test_get_data(name, exp_except, request):
 async def test_set_data(name, key, code, exp_code, exp_except, request):
     context = request.getfixturevalue("context")
     context.api = DabPumpsApi(TEST_USERNAME, TEST_PASSWORD)
+    assert context.api.closed == False
 
     # Login
     await context.api.async_login()

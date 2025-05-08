@@ -32,6 +32,8 @@ async def test_get(name, mode, url, exp_text, exp_json):
         "headers": { "Accept": "*/*" }
     }
 
+    assert not client.closed
+   
     (request,response) = await client.async_send_request(req)
 
     assert request["method"] == req["method"]
@@ -53,6 +55,11 @@ async def test_get(name, mode, url, exp_text, exp_json):
         assert "json" in response
     else:
         assert "json" not in response
+
+    # Check close behavior as well
+    assert not client.closed
+    await client.async_close()
+    assert client.closed
 
 
 @pytest.mark.asyncio
@@ -77,4 +84,11 @@ async def test_fail(name, mode, url, exp_success, exp_text, exp_json):
 
     with pytest.raises(Exception) as e_info:
         (request,response) = await client.async_send_request(req)
+
+        
+    # Check close behavior as well
+    assert not client.closed
+    await client.async_close()
+    assert client.closed
+
 

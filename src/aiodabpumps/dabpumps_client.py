@@ -20,6 +20,11 @@ class DabPumpsClient_Base:
         pass
 
     
+    @property
+    def closed(self) -> bool:
+        raise NotImplementedError("DabPumpsClientBase::is_closed")
+
+
     async def async_close(self):
         raise NotImplementedError("DabPumpsClientBase::_async_close")
     
@@ -52,6 +57,11 @@ class DabPumpsClient_Httpx(DabPumpsClient_Base):
     def __init__(self, client:httpx.AsyncClient|None = None):
         self._asyncclient:httpx.AsyncClient = client or httpx.AsyncClient()
         self._client_owned = client == None
+
+
+    @property
+    def closed(self) -> bool:
+        return self._asyncclient.is_closed
 
 
     async def async_close(self):
@@ -116,9 +126,16 @@ class DabPumpsClient_Aiohttp(DabPumpsClient_Base):
         self._clientsession: aiohttp.ClientSession = client or aiohttp.ClientSession()
         self._client_owned = client == None
 
+
+    @property
+    def closed(self) -> bool:
+        return self._clientsession.closed
+
+
     async def async_close(self):
         if self._client_owned:
             await self._clientsession.close()
+
 
     async def async_send_request(self, request):
         """
