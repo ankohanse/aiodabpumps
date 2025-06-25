@@ -253,7 +253,7 @@ class DabPumpsApi:
             },
         }
         
-        _LOGGER.debug(f"DAB Pumps login for '{self._username}' via {request["method"]} {request["url"]}")
+        _LOGGER.debug(f"DAB Pumps login for '{self._username}' via {request["method"]} {request["url"]} with isDabLive={isDabLive}")
         result = await self._async_send_request(context, request)
 
         token = result.get('access_token') or ""
@@ -276,7 +276,7 @@ class DabPumpsApi:
             "method": "POST",
             "url": DABPUMPS_SSO_URL + f"/auth/realms/dwt-group/protocol/openid-connect/token",
             "headers": {
-                'Content-Type': 'application/x-www-form-urlencoded'
+                'Content-Type': 'application/x-www-form-urlencoded',
             },
             "data": {
                 'client_id': 'DWT-Dconnect-Mobile',
@@ -305,7 +305,7 @@ class DabPumpsApi:
             "params": { 
                 'email': self._username,
                 'token': token,
-            }
+            },
         }
 
         _LOGGER.debug(f"DAB Pumps validate token via {request["method"]} {request["url"]}")
@@ -341,7 +341,7 @@ class DabPumpsApi:
             "method": "POST",
             "url": match.group(1).replace('&amp;', '&'),
             "headers": {
-                'Content-Type': 'application/x-www-form-urlencoded'
+                'Content-Type': 'application/x-www-form-urlencoded',
             },
             "data": {
                 'username': self._username, 
@@ -380,6 +380,7 @@ class DabPumpsApi:
             context = f"installation list"
             request = {
                 "method": "GET",
+                #"url": DABPUMPS_API_URL + '/getInstallationList',
                 "url": DABPUMPS_API_URL + '/api/v1/installation',
             }
 
@@ -388,7 +389,7 @@ class DabPumpsApi:
 
         # Process the resulting raw data
         install_map = {}
-        installations = raw.get('values', [])
+        installations = raw.get('values', None) or raw.get('rows', None) or []
         
         for install_idx, installation in enumerate(installations):
             
@@ -447,6 +448,7 @@ class DabPumpsApi:
             context = f"installation {install_id}"
             request = {
                 "method": "GET",
+                #"url": DABPUMPS_API_URL + f"/getInstallation/{install_id}",
                 "url": DABPUMPS_API_URL + f"/api/v1/installation/{install_id}",
             }
             
@@ -761,8 +763,8 @@ class DabPumpsApi:
             status_old = self._status_actual_map.get(status_key, None)
 
             if status_old and \
-               status_old.update_ts is not None and \
-               (datetime.now(timezone.utc) - status_old.update_ts).total_seconds() < STATUS_UPDATE_HOLD:
+            status_old.update_ts is not None and \
+            (datetime.now(timezone.utc) - status_old.update_ts).total_seconds() < STATUS_UPDATE_HOLD:
 
                 _LOGGER.debug(f"Skip refresh of recently updated status ({status_key})")
                 continue
@@ -783,7 +785,7 @@ class DabPumpsApi:
             status_map[status_key] = status_new
 
         if len(status_map) == 0:
-             raise DabPumpsApiDataError(f"No statusses found for '{serial}'")
+            raise DabPumpsApiDataError(f"No statusses found for '{serial}'")
         
         _LOGGER.debug(f"DAB Pumps statusses found for '{serial}' with {len(status_map)} values")
 
@@ -841,7 +843,7 @@ class DabPumpsApi:
             "method": "POST",
             "url": DABPUMPS_API_URL + f"/dum/{status.serial}",
             "headers": {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
             },
             "json": {
                 'key': status.key, 
@@ -1010,6 +1012,16 @@ class DabPumpsApi:
         """GET or POST a request for JSON data"""
 
         timestamp = datetime.now()
+
+        # Always add certain headers
+        if not "headers" in request:
+            request["headers"] = {}
+
+        request["headers"]['Cache-Control'] = 'no-cache'
+        #request["headers"]['Connection'] = 'close'
+        #request["headers"]['Accept'] = '*/*'
+
+        # Perform the request
         (request,response) = await self._client.async_send_request(request)
 
         # Save the diagnostics if requested
