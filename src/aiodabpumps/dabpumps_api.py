@@ -21,6 +21,7 @@ from .dabpumps_const import (
     DABPUMPS_SSO_URL,
     DABPUMPS_API_URL,
     DABPUMPS_API_DOMAIN,
+    DABPUMPS_API_LOGIN_TIME_VALID,
     DABPUMPS_API_TOKEN_COOKIE,
     DABPUMPS_API_TOKEN_TIME_MIN,
     API_LOGIN,
@@ -59,6 +60,7 @@ class DabPumpsApi:
 
         # Retrieved data
         self._login_method: str|None = None
+        self._login_time: float = 0
         self._install_map: dict[str, DabPumpsInstall] = {}
         self._device_map: dict[str, DabPumpsDevice] = {}
         self._config_map: dict[str, DabPumpsConfig] = {}
@@ -80,13 +82,19 @@ class DabPumpsApi:
         # Client (aiohttp or httpx) to keep track of cookies during login and subsequent calls
         # We keep the same client for the whole life of the api instance.
         if isinstance(client, httpx.AsyncClient):
+            _LOGGER.debug(f"using passed httpx client")
             self._client = DabPumpsClient_Httpx(client)
 
         elif isinstance(client, aiohttp.ClientSession):
+            _LOGGER.debug(f"using passed aiohttp client")
             self._client = DabPumpsClient_Aiohttp(client)
 
         else:
-            self._client = DabPumpsClient_Aiohttp()
+            #_LOGGER.debug(f"using new aiohttp client")
+            #self._client = DabPumpsClient_Aiohttp()
+            #
+            _LOGGER.debug(f"using new httpx client")
+            self._client = DabPumpsClient_Httpx()
 
         # To pass diagnostics data back to our parent
         self._diagnostics_callback = None
@@ -183,11 +191,28 @@ class DabPumpsApi:
         token = await self._client.async_get_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_TOKEN_COOKIE)
         if token:
             token_payload = jwt.decode(jwt=token, options={"verify_signature": False})
-            
-            if token_payload.get("exp", 0) - time.time() > DABPUMPS_API_TOKEN_TIME_MIN:
-                # still valid for another 10 seconds
+            token_exp = token_payload.get("exp", 0)
+            token_iat = token_payload.get("iat", 0)
+            epoch_now = time.time()
+
+            # The DAB Pumps server UTC time is observed to be out by an hour (either before or behind), 
+            # so we cannot not trust the expiry time in the token!
+            # Instead we just check that the last login was not too long ago
+            if epoch_now - self._login_time < DABPUMPS_API_LOGIN_TIME_VALID:
+                #_LOGGER.debug(f"Token reuse; login={self._login_time}, now={epoch_now}, exp={token_exp}, iat={token_iat}")
                 await self._async_update_diagnostics(datetime.now(), "token reuse", None, None, token_payload)
                 return
+            #else:
+                #_LOGGER.debug(f"Token renew; login={self._login_time}, now={epoch_now}, exp={token_exp}, iat={token_iat}")
+            
+            # if token_exp - epoch_now > DABPUMPS_API_TOKEN_TIME_MIN:
+            #     # still valid for another 10 seconds
+            #     _LOGGER.debug(f"Token reuse; exp={token_exp}, now={epoch_now}")
+            #     await self._async_update_diagnostics(datetime.now(), "token reuse", None, None, token_payload)
+            #     return
+            
+            # else:
+            #     _LOGGER.debug(f"Token expired; exp={token_exp}, now={epoch_now}")
 
         # Make sure to have been logged out of previous sessions.
         # DAB Pumps service does not handle multiple logins from same account very well
@@ -219,7 +244,8 @@ class DabPumpsApi:
                 # if we reached this point then a login method succeeded
                 # keep using this client and its cookies and remember which method had success
                 _LOGGER.debug(f"DAB Pumps login succeeded using method {method}")
-                self._login_method = method  
+                self._login_method = method
+                self._login_time = time.time()
                 return 
             
             except Exception as ex:
@@ -314,7 +340,7 @@ class DabPumpsApi:
         # if we reach this point then the token was OK
         # Store returned access-token as cookie so it will automatically be passed in next calls
         await self._client.async_set_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_TOKEN_COOKIE, token)
-       
+
 
     async def _async_login_dconnect_web(self):
         """Login to DAB Pumps via the method as used by the DConnect website"""
@@ -361,7 +387,7 @@ class DabPumpsApi:
 
         # if we reach this point without exceptions then login was successfull
         # client access_token is already set by the last call
-        
+
         
     async def async_logout(self):
         """Logout from DAB Pumps"""
@@ -370,6 +396,7 @@ class DabPumpsApi:
         # Instead of closing we will simply forget all cookies. The result is that on a next
         # request, the client will act like it is a new one.
         await self._client.async_clear_cookies()
+        self._login_time = 0
         
         
     async def async_fetch_install_list(self, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
@@ -1018,7 +1045,7 @@ class DabPumpsApi:
             request["headers"] = {}
 
         request["headers"]['Cache-Control'] = 'no-cache'
-        #request["headers"]['Connection'] = 'close'
+        #request["headers"]['Connection'] = 'keep-alive'
         #request["headers"]['Accept'] = '*/*'
 
         # Perform the request
@@ -1048,6 +1075,9 @@ class DabPumpsApi:
                 if code in ['FORBIDDEN']:
                     error = f"Authorization failed: {res} {code} {msg}"
                     _LOGGER.debug(error)    # logged as warning after last retry
+
+                    # Force a logout to so next login will be a real login, not a token reuse
+                    await self.async_logout()
                     raise DabPumpsApiRightsError(error)
                 else:
                     error = f"Unable to perform request, got response {res} {code} {msg} while trying to reach {request["url"]}"

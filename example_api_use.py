@@ -9,6 +9,10 @@ from aiodabpumps import DabPumpsApi
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
 TEST_USERNAME = "fill in your DConnect username here"
 TEST_PASSWORD = "fill in your DConnect password here"
 #
@@ -55,37 +59,46 @@ async def main():
 
             logger.info(f"devices: {len(api.device_map)}")
 
+        for device in api.device_map.values():
+            # Log the retrieved info
+            logger.info("")
+            logger.info(f"device: {device.name} ({device.serial})")                
+            for k,v in device._asdict().items():
+                logger.info(f"    {k}: {v}")
+
+            config = api.config_map[device.config_id]                     
+            logger.info("")
+            logger.info(f"config: {config.description} ({config.id})")
+            logger.info(f"    meta_params: {len(config.meta_params)}")             
+            #for k,v in config.meta_params.items():
+            #    logger.info(f"        {k}: {v}")
+
+        # Once the calls above have been perfomed, the calls below can be repeated periodically.
+        for t in range(60):
+            # Regularly repeat the login call to make sure the access-token is renewed when needed.
+            await api.async_login()
+
             for device in api.device_map.values():
-                # Log the retrieved info
-                logger.info("")
-                logger.info(f"device: {device.name} ({device.serial})")                
-                for k,v in device._asdict().items():
-                    logger.info(f"    {k}: {v}")
-
-                config = api.config_map[device.config_id]                     
-                logger.info("")
-                logger.info(f"config: {config.description} ({config.id})")
-                logger.info(f"    meta_params: {len(config.meta_params)}")             
-                #for k,v in config.meta_params.items():
-                #    logger.info(f"        {k}: {v}")
-
-                # Once the calls above have been perfomed, the call below can be repeated periodically
                 # Retrieve device statusses
                 await api.async_fetch_device_statusses(device.serial)
 
                 device_statusses = { k:v for k,v in api.status_map.items() if v.serial==device.serial }
                 logger.info("")
-                logger.info(f"    statusses: {len(device_statusses)}")
+                logger.info(f"statusses: {len(device_statusses)}")
 
                 for k,v in device_statusses.items():
                     value_with_unit = f"{v.value} {v.unit}" if v.unit is not None else v.value
 
                     if (v.value != v.code):
                         # Display real-life value and original encoded value
-                        logger.info(f"        {v.key}: {value_with_unit} ('{v.code}')")
+                        logger.info(f"    {v.key}: {value_with_unit} ('{v.code}')")
                     else:
                         # Display real-life value, original encoded value is the same
-                        logger.info(f"        {v.key}: {value_with_unit}")
+                        logger.info(f"    {v.key}: {value_with_unit}")
+
+            # Wait one minute and retrieve device statusses again
+            logger.info(f"wait")
+            await asyncio.sleep(60)
 
     except Exception as e:
         logger.info(f"Unexpected exception: {e}")

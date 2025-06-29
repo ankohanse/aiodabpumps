@@ -22,6 +22,9 @@ from . import TEST_USERNAME, TEST_PASSWORD
 
 _LOGGER = logging.getLogger(__name__)
 
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 
 class TestContext:
     def __init__(self):
@@ -86,12 +89,13 @@ async def test_login(name, usr, pwd, exp_except, request):
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("context")
 @pytest.mark.parametrize(
-    "name, exp_except",
+    "name, loop, exp_except",
     [
-        ("data ok ", None),
+        ("data ok", 0, None),
+        ("data loop", 200, None),
     ]
 )
-async def test_get_data(name, exp_except, request):
+async def test_get_data(name, loop, exp_except, request):
     context = request.getfixturevalue("context")
     context.api = DabPumpsApi(TEST_USERNAME, TEST_PASSWORD)
     assert context.api.closed == False
@@ -148,18 +152,32 @@ async def test_get_data(name, exp_except, request):
             assert type(param) is DabPumpsParams
             assert param.key is not None
 
-    # Get device statusses
-    await context.api.async_fetch_device_statusses(device_serial)
+    for idx in range(loop+1):
+        # Get device statusses
+        try:
+            # Check cookie and re-login if needed
+            await context.api.async_login()
 
-    assert context.api.status_map is not None
-    assert type(context.api.status_map) is dict
-    assert len(context.api.status_map) > 0
+            await context.api.async_fetch_device_statusses(device_serial)
 
-    for status_id,status in context.api.status_map.items():
-        assert type(status_id) is str
-        assert type(status) is DabPumpsStatus
-        assert status.serial is not None
-        assert status.key is not None
+            assert context.api.status_map is not None
+            assert type(context.api.status_map) is dict
+            assert len(context.api.status_map) > 0
+
+            for status_id,status in context.api.status_map.items():
+                assert type(status_id) is str
+                assert type(status) is DabPumpsStatus
+                assert status.serial is not None
+                assert status.key is not None
+        
+        except DabPumpsApiRightsError:
+            await context.api.async_logout()
+        except:
+            continue
+
+        if loop:
+            await asyncio.sleep(60)
+            _LOGGER.debug(f"Loop test, {idx} of {loop}")
 
 
 @pytest.mark.asyncio

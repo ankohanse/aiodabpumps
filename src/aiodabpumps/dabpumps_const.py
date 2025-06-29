@@ -9,6 +9,7 @@ DABPUMPS_API_URL = "https://dconnect.dabpumps.com"
 DABPUMPS_API_DOMAIN = "dconnect.dabpumps.com"
 DABPUMPS_API_TOKEN_COOKIE = "dabcsauthtoken"
 DABPUMPS_API_TOKEN_TIME_MIN = 10 # seconds remaining before we re-login
+DABPUMPS_API_LOGIN_TIME_VALID = 30 * 60 # 30 minutes before we require re-login
 
 API_LOGIN = types.SimpleNamespace()
 API_LOGIN.DABLIVE_APP_0 = 'DabLive_app_0'
