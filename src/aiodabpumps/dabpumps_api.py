@@ -90,11 +90,11 @@ class DabPumpsApi:
             self._client = DabPumpsClient_Aiohttp(client)
 
         else:
-            #_LOGGER.debug(f"using new aiohttp client")
-            #self._client = DabPumpsClient_Aiohttp()
+            _LOGGER.debug(f"using new aiohttp client")
+            self._client = DabPumpsClient_Aiohttp()
             #
-            _LOGGER.debug(f"using new httpx client")
-            self._client = DabPumpsClient_Httpx()
+            #_LOGGER.debug(f"using new httpx client")
+            #self._client = DabPumpsClient_Httpx()
 
         # To pass diagnostics data back to our parent
         self._diagnostics_callback = None
@@ -1044,6 +1044,7 @@ class DabPumpsApi:
         if not "headers" in request:
             request["headers"] = {}
 
+        request["headers"]['User-Agent'] = 'python-requests/2.20.0'
         request["headers"]['Cache-Control'] = 'no-cache'
         #request["headers"]['Connection'] = 'keep-alive'
         #request["headers"]['Accept'] = '*/*'
