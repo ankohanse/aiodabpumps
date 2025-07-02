@@ -25,3 +25,9 @@ DEVICE_ATTR_EXTRA = {
     "mac_address": ['MacWlan'],
     "sw_version": ['LvFwVersion', 'ucVersion']
 }
+
+# Known device statusses that normally don't hold a value until an action occurs
+DEVICE_STATUS_STATIC = {
+    "PowerShowerCountdown",
+    "SleepModeCountdown",
+}

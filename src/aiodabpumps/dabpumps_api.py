@@ -26,6 +26,7 @@ from .dabpumps_const import (
     DABPUMPS_API_TOKEN_TIME_MIN,
     API_LOGIN,
     DEVICE_ATTR_EXTRA,
+    DEVICE_STATUS_STATIC,
     STATUS_UPDATE_HOLD,
 )
 
@@ -729,6 +730,12 @@ class DabPumpsApi:
             is_static = False
             code = None
             value = ""
+
+            # Detect known params that are normally hidden until an action occurs
+            if params.key in DEVICE_STATUS_STATIC:
+                is_static = True
+                code = None
+                value = None
 
             # Detect 'button' params (type 'enum' with only one possible value)
             if params.type == 'enum' and len(params.values or []) == 1:
