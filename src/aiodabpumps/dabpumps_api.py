@@ -672,6 +672,9 @@ class DabPumpsApi:
         )
         config_map[conf_id] = config
         
+        if len(config_map) == 0:
+            raise DabPumpsApiDataError(f"No config found for '{config_id}'")
+        
         _LOGGER.debug(f"DAB Pumps configuration found: {conf_name} with {len(conf_params)} metadata params")        
 
         # Merge with configurations from other devices

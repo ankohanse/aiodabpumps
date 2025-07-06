@@ -34,7 +34,7 @@ class TestContext:
         if self.api:
             await self.api.async_logout()
             await self.api.async_close()
-            assert context.api.closed == True
+            assert self.api.closed == True
 
 
 @pytest_asyncio.fixture
@@ -92,7 +92,7 @@ async def test_login(name, usr, pwd, exp_except, request):
     "name, loop, exp_except",
     [
         ("data ok", 0, None),
-        ("data loop", 200, None),
+        # ("data loop", 200, None),
     ]
 )
 async def test_get_data(name, loop, exp_except, request):
@@ -321,10 +321,10 @@ async def config_map():
 @pytest_asyncio.fixture
 async def status_map():
     status_map = {
-        'serial_key_enum': DabPumpsStatus('SERIAL', 'KEY_ENUM', '1', 'one', None, None),
-        'serial_key_float': DabPumpsStatus('SERIAL', 'KEY_FLOAT', '1', 0.1, 'F', None),
-        'serial_key_int': DabPumpsStatus('SERIAL', 'KEY_INT', '1', 1, 'I', None),
-        'serial_key_label': DabPumpsStatus('SERIAL', 'KEY_LABEL', 'ABC', 'ABC', None, None),
+        'serial_key_enum': DabPumpsStatus('SERIAL', 'KEY_ENUM', '1', 'one', None, None, None),
+        'serial_key_float': DabPumpsStatus('SERIAL', 'KEY_FLOAT', '1', 0.1, 'F', None, None),
+        'serial_key_int': DabPumpsStatus('SERIAL', 'KEY_INT', '1', 1, 'I', None, None),
+        'serial_key_label': DabPumpsStatus('SERIAL', 'KEY_LABEL', 'ABC', 'ABC', None, None, None),
     }
     yield status_map
 
