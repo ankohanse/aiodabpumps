@@ -277,7 +277,7 @@ async def test_set_data(name, key, code, exp_code, exp_except, request):
         assert status.update_ts is not None
 
         # Wait until the backend has processed the change and test again
-        await asyncio.sleep(30)
+        await asyncio.sleep(40)
 
     # Test (either not changed or after change has been processed by backend)
     await context.api.async_fetch_device_statusses(status.serial)

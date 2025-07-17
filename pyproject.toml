@@ -1,6 +1,6 @@
 [project]
 name = "aiodabpumps"
-version = "0.1.17"
+version = "0.1.18"
 authors = [
   { name="Anko Hanse", email="anko_hanse@hotmail.com" },
 ]

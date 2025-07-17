@@ -706,18 +706,6 @@ class DabPumpsApi:
     async def _async_fetch_static_statusses(self, serial: str):
         """Fetch the static statusses for a DAB Pumps device"""
 
-        # Check for static statusses that have been modified
-        for status_key in self._status_static_map.keys():
-
-            # Does this static status have a related actual/modified status?
-            status_mod = self._status_actual_map.get(status_key, None)
-            if status_mod and \
-               status_mod.update_ts is not None and \
-               (datetime.now(timezone.utc) - status_mod.update_ts).total_seconds() > STATUS_UPDATE_HOLD:
-                
-                # Remove the actual/modified value
-                self._status_actual_map.pop(status_key, None)
-
         # Process the existing data
         status_map = {}
 
@@ -792,18 +780,22 @@ class DabPumpsApi:
 
         for item_key, item_code in values.items():
             # the code 'h' is used when a property is not available/supported
+            # Note the some properties (PowerShowerCountdown, SleepModeCountdown) can switch between 
+            # availabe (and be in _status_actual_map) and unavailable (still be in _status_static_map).
             if item_code=='h':
                 continue
 
-            # Check if this item was recently updated in our current status_map
+            # Check if this status was recently updated via async_change_device_status
+            # We keep the updated value for a hold period to prevent it from flipping back and forth 
+            # between its old value and new value because of delays in update on the DAB server side.
             status_key = DabPumpsApi.create_id(serial, item_key)
             status_old = self._status_actual_map.get(status_key, None)
 
-            if status_old and \
-            status_old.update_ts is not None and \
-            (datetime.now(timezone.utc) - status_old.update_ts).total_seconds() < STATUS_UPDATE_HOLD:
+            if status_old and status_old.update_ts is not None and \
+               (datetime.now(timezone.utc) - status_old.update_ts).total_seconds() < STATUS_UPDATE_HOLD:
 
-                _LOGGER.debug(f"Skip refresh of recently updated status ({status_key})")
+                _LOGGER.info(f"Skip refresh of recently updated status ({status_key})")
+                status_map[status_key] = status_old
                 continue
 
             # Resolve the coded value into the real world value
@@ -829,6 +821,22 @@ class DabPumpsApi:
         # Merge with statusses from other devices
         self._status_actual_map_ts = datetime.now()
         self._status_actual_map.update(status_map)
+
+        # Cleanup statusses from this device that are no longer needed in _status_actual_map
+        candidate_map = { k:v for k,v in self._status_actual_map.items() if v.serial == serial and not k in status_map }
+        for status_key, status_old in candidate_map.items():
+                
+            # Check if this status was recently updated via async_change_device_status
+            # We keep the updated value for a hold period to prevent it from flipping back and forth 
+            # between its old value and new value because of delays in update on the DAB server side.
+            if status_old.update_ts is not None and \
+               (datetime.now(timezone.utc) - status_old.update_ts).total_seconds() < STATUS_UPDATE_HOLD:
+
+                # Recently updated static status (i.e. button press)
+                continue
+                
+            # Status can be removed
+            self._status_actual_map.pop(status_key, None)
 
         # Return data or raw or both
         match ret:
