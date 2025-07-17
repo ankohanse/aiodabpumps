@@ -89,6 +89,51 @@ async def test_login(name, usr, pwd, exp_except, request):
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("context")
 @pytest.mark.parametrize(
+    "name, usr, pwd, exp_except",
+    [
+        ("login multi", TEST_USERNAME, TEST_PASSWORD, None),
+    ]
+)
+async def test_login_seq(name, usr, pwd, exp_except, request):
+    context = request.getfixturevalue("context")
+    assert context.api is None
+
+    # First call with wrong pwd
+    context.api = DabPumpsApi(usr, pwd+"xxx")
+    assert context.api.closed == False
+    assert context.api.login_method is None
+
+    with pytest.raises(DabPumpsApiAuthError):
+        await context.api.async_login()
+
+    # Next call with correct pwd
+    context.api = DabPumpsApi(usr, pwd)
+    assert context.api.closed == False
+    assert context.api.login_method is None
+
+    if exp_except is None:
+        await context.api.async_login()
+
+        assert context.api.login_method is not None
+        assert context.api.install_map is not None
+        assert context.api.device_map is not None
+        assert context.api.config_map is not None
+        assert context.api.status_map is not None
+        assert context.api.string_map is not None
+        assert len(context.api.install_map) == 0
+        assert len(context.api.device_map) == 0
+        assert len(context.api.config_map) == 0
+        assert len(context.api.status_map) == 0
+        assert len(context.api.string_map) == 0
+
+    else:
+        with pytest.raises(exp_except):
+            await context.api.async_login()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("context")
+@pytest.mark.parametrize(
     "name, loop, exp_except",
     [
         ("data ok", 0, None),

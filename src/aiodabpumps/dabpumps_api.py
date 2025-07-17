@@ -405,7 +405,7 @@ class DabPumpsApi:
 
         # Retrieve data via REST request
         if raw is None:
-            context = f"installation list"
+            context = f"installations {self._username.lower()}"
             request = {
                 "method": "GET",
                 #"url": DABPUMPS_API_URL + '/getInstallationList',
@@ -1055,9 +1055,8 @@ class DabPumpsApi:
             request["headers"] = {}
 
         request["headers"]['User-Agent'] = 'python-requests/2.20.0'
-        request["headers"]['Cache-Control'] = 'no-cache'
-        #request["headers"]['Connection'] = 'keep-alive'
-        #request["headers"]['Accept'] = '*/*'
+        request["headers"]['Cache-Control'] = 'no-store, no-cache, max-age=0'
+        request["headers"]['Connection'] = 'close'
 
         # Perform the request
         (request,response) = await self._client.async_send_request(request)
