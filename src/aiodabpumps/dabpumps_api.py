@@ -779,39 +779,43 @@ class DabPumpsApi:
         status_ts = datetime.fromisoformat(statusts) if statusts else datetime.now(timezone.utc)
 
         for item_key, item_code in values.items():
-            # the code 'h' is used when a property is not available/supported
-            # Note the some properties (PowerShowerCountdown, SleepModeCountdown) can switch between 
-            # availabe (and be in _status_actual_map) and unavailable (still be in _status_static_map).
-            if item_code=='h':
-                continue
+            try:
+                # the code 'h' is used when a property is not available/supported
+                # Note the some properties (PowerShowerCountdown, SleepModeCountdown) can switch between 
+                # availabe (and be in _status_actual_map) and unavailable (still be in _status_static_map).
+                if item_code=='h':
+                    continue
 
-            # Check if this status was recently updated via async_change_device_status
-            # We keep the updated value for a hold period to prevent it from flipping back and forth 
-            # between its old value and new value because of delays in update on the DAB server side.
-            status_key = DabPumpsApi.create_id(serial, item_key)
-            status_old = self._status_actual_map.get(status_key, None)
+                # Check if this status was recently updated via async_change_device_status
+                # We keep the updated value for a hold period to prevent it from flipping back and forth 
+                # between its old value and new value because of delays in update on the DAB server side.
+                status_key = DabPumpsApi.create_id(serial, item_key)
+                status_old = self._status_actual_map.get(status_key, None)
 
-            if status_old and status_old.update_ts is not None and \
-               (datetime.now(timezone.utc) - status_old.update_ts).total_seconds() < STATUS_UPDATE_HOLD:
+                if status_old and status_old.update_ts is not None and \
+                (datetime.now(timezone.utc) - status_old.update_ts).total_seconds() < STATUS_UPDATE_HOLD:
 
-                _LOGGER.info(f"Skip refresh of recently updated status ({status_key})")
-                status_map[status_key] = status_old
-                continue
+                    _LOGGER.info(f"Skip refresh of recently updated status ({status_key})")
+                    status_map[status_key] = status_old
+                    continue
 
-            # Resolve the coded value into the real world value
-            (item_val, item_unit) = self._decode_status_value(serial, item_key, item_code)
+                # Resolve the coded value into the real world value
+                (item_val, item_unit) = self._decode_status_value(serial, item_key, item_code)
 
-            # Add it to our statusses
-            status_new = DabPumpsStatus(
-                serial = serial,
-                key = item_key,
-                code = item_code,
-                value = item_val,
-                unit = item_unit,
-                status_ts = status_ts,
-                update_ts = None,
-            )
-            status_map[status_key] = status_new
+                # Add it to our statusses
+                status_new = DabPumpsStatus(
+                    serial = serial,
+                    key = item_key,
+                    code = item_code,
+                    value = item_val,
+                    unit = item_unit,
+                    status_ts = status_ts,
+                    update_ts = None,
+                )
+                status_map[status_key] = status_new
+
+            except Exception as e:
+                _LOGGER.warning(f"Exception while processing status for '{serial}:{item_key}': {e}")
 
         if len(status_map) == 0:
             raise DabPumpsApiDataError(f"No statusses found for '{serial}'")
@@ -988,13 +992,16 @@ class DabPumpsApi:
                 value = self.translate_string(params.values.get(code, code))
 
             case 'measure':
-                if params.weight and params.weight != 1 and params.weight != 0:
-                    # Convert to float
-                    precision = int(math.floor(math.log10(1.0 / params.weight)))
-                    value = round(float(code) * params.weight, precision)
+                if code != '':
+                    if params.weight and params.weight != 1 and params.weight != 0:
+                        # Convert to float
+                        precision = int(math.floor(math.log10(1.0 / params.weight)))
+                        value = round(float(code) * params.weight, precision)
+                    else:
+                        # Convert to int
+                        value = int(code)
                 else:
-                    # Convert to int
-                    value = int(code)
+                    value = None
                     
             case 'label':
                 # Convert to string; no translation
