@@ -42,7 +42,7 @@ DabPumpsInstall = namedtuple('DabPumpsInstall', 'id, name, description, company,
 DabPumpsDevice = namedtuple('DabPumpsDevice', 'id, serial, name, vendor, product, hw_version, sw_version, mac_address, config_id, install_id')
 DabPumpsConfig = namedtuple('DabPumpsConfig', 'id, label, description, meta_params')
 DabPumpsParams = namedtuple('DabPumpsParams', 'key, type, unit, weight, values, min, max, family, group, view, change, log, report')
-DabPumpsStatus = namedtuple('DabPumpsStatus', 'serial, key, code, value, unit, status_ts, update_ts')
+DabPumpsStatus = namedtuple('DabPumpsStatus', 'serial, key, name, code, value, unit, status_ts, update_ts')
 
 class DabPumpsRet(Enum):
     NONE = 0
@@ -742,6 +742,7 @@ class DabPumpsApi:
                 status_new = DabPumpsStatus(
                     serial = device.serial,
                     key = params.key,
+                    name = self.translate_string(params.key),
                     code = code,
                     value = value,
                     unit = params.unit,
@@ -806,6 +807,7 @@ class DabPumpsApi:
                 status_new = DabPumpsStatus(
                     serial = serial,
                     key = item_key,
+                    name = self.translate_string(item_key),
                     code = item_code,
                     value = item_val,
                     unit = item_unit,

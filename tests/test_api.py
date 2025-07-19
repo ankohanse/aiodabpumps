@@ -214,6 +214,7 @@ async def test_get_data(name, loop, exp_except, request):
                 assert type(status) is DabPumpsStatus
                 assert status.serial is not None
                 assert status.key is not None
+                assert status.name is not None
         
         except DabPumpsApiRightsError:
             await context.api.async_logout()
@@ -366,10 +367,10 @@ async def config_map():
 @pytest_asyncio.fixture
 async def status_map():
     status_map = {
-        'serial_key_enum': DabPumpsStatus('SERIAL', 'KEY_ENUM', '1', 'one', None, None, None),
-        'serial_key_float': DabPumpsStatus('SERIAL', 'KEY_FLOAT', '1', 0.1, 'F', None, None),
-        'serial_key_int': DabPumpsStatus('SERIAL', 'KEY_INT', '1', 1, 'I', None, None),
-        'serial_key_label': DabPumpsStatus('SERIAL', 'KEY_LABEL', 'ABC', 'ABC', None, None, None),
+        'serial_key_enum': DabPumpsStatus('SERIAL', 'KEY_ENUM', 'NameEnum', '1', 'one', None, None, None),
+        'serial_key_float': DabPumpsStatus('SERIAL', 'KEY_FLOAT', 'NameFloat', '1', 0.1, 'F', None, None),
+        'serial_key_int': DabPumpsStatus('SERIAL', 'KEY_INT', 'NameInt', '1', 1, 'I', None, None),
+        'serial_key_label': DabPumpsStatus('SERIAL', 'KEY_LABEL', 'NameLabel', 'ABC', 'ABC', None, None, None),
     }
     yield status_map
 

@@ -91,10 +91,10 @@ async def main():
 
                     if (v.value != v.code):
                         # Display real-life value and original encoded value
-                        logger.info(f"    {v.key}: {value_with_unit} ('{v.code}')")
+                        logger.info(f"    {v.name}: {value_with_unit} ('{v.code}')")
                     else:
                         # Display real-life value, original encoded value is the same
-                        logger.info(f"    {v.key}: {value_with_unit}")
+                        logger.info(f"    {v.name}: {value_with_unit}")
 
             # Wait one minute and retrieve device statusses again
             logger.info(f"wait")
