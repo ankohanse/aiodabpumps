@@ -575,10 +575,9 @@ class DabPumpsApi:
         This function should be run AFTER async_fetch_device_config
         """
     
-        # Retrieve data via REST request
+        # If needed retrieve data via REST request. Apply retrieved or passed data.
         # This is actually the same data as used for statusses
-        if raw is None:
-            raw = await self.async_fetch_device_statusses(serial, raw=raw, ret=DabPumpsRet.RAW)
+        raw = await self.async_fetch_device_statusses(serial, raw=raw, ret=DabPumpsRet.RAW)
         
         # Process the resulting raw data
         device = self._device_map[serial]
