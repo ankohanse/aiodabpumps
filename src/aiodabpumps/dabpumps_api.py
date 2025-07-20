@@ -508,9 +508,6 @@ class DabPumpsApi:
             raise DabPumpsApiDataError(f"Expected installation id {install_id} was not found in returned installation details")
 
         device_map = {}
-        serial_list = []
-        config_list = []
-
         ins_dums = raw.get('dums', [])
 
         for dum_idx, dum in enumerate(ins_dums):
@@ -539,35 +536,28 @@ class DabPumpsApi:
                 mac_address = None,
             )
             device_map[dum_serial] = device
-
-            # Keep track of config_id's and serials we have seen
-            if dum_config not in config_list:
-                config_list.append(dum_config) 
-            
-            if dum_serial not in serial_list:
-                serial_list.append(dum_serial)
             
             _LOGGER.debug(f"DAB Pumps device found: {dum_name} with serial {dum_serial}")
             
         # Also detect the user role within this installation
         user_role = raw.get('user_role', 'CUSTOMER')
 
-        # Sanity check. # Never overwrite a known device_map, config_map or status_map with empty lists
+        # Sanity check. # Never overwrite a known device_map
         if len(device_map) == 0:
             raise DabPumpsApiDataError(f"No devices found for installation id {install_id}")
 
-        # Cleanup device config and device statusses to only keep values that are still part of a device in this installation
-        config_map = { k: v for k, v in self._config_map.items() if v.id in config_list }
-        status_actual_map = { k: v for k, v in self._status_actual_map.items() if v.serial in serial_list }
-        status_static_map = { k: v for k, v in self._status_static_map.items() if v.serial in serial_list }
+        # Cleanup devices that are no longer part of this installation
 
-        # Remember/update the found maps.
+        # Remember/update the found map.
         self._device_map_ts = datetime.now()
-        self._device_map = device_map
-        self._config_map = config_map
-        self._status_actual_map = status_actual_map
-        self._status_static_map = status_static_map
+        self._device_map.update(device_map)
 
+        # Cleanup devices from this installation that are no longer needed in _device_map
+        candidate_list = [ k for k,v in self._device_map.items() if v.install_id == install_id and not k in device_map ]
+        for key in candidate_list:
+            self._device_map.pop(key, None)
+
+        # Remeber user role.
         self._user_role_ts = datetime.now()
         self._user_role = user_role
 
