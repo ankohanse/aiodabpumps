@@ -3,6 +3,7 @@
 import copy
 import math
 import aiohttp
+import asyncio
 import httpx
 import json
 import jwt
@@ -97,6 +98,9 @@ class DabPumpsApi:
             #_LOGGER.debug(f"using new httpx client")
             #self._client = DabPumpsClient_Httpx()
 
+        # Locks to protect certain operations from being called from multiple threads
+        self._login_lock = asyncio.Lock()
+
         # To pass diagnostics data back to our parent
         self._diagnostics_callback = None
 
@@ -186,7 +190,19 @@ class DabPumpsApi:
 
 
     async def async_login(self):
-        """Login to DAB Pumps by trying each of the possible login methods"""
+        """
+        Login to DAB Pumps by trying each of the possible login methods.
+        Guards for calls from multiple threads.
+        """
+
+        # Only one thread at a time can check token cookie and do subsequent login if needed.
+        # Once one thread is done, the next thread can then check the (new) token cookie.
+        async with self._login_lock:
+            await self._async_login()
+
+
+    async def _async_login(self):
+        """Login to DAB Pumps by trying each of the possible login methods"""        
 
         # Step 0: do we still have a cookie with a non-expired auth token?
         token = await self._client.async_get_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_TOKEN_COOKIE)
@@ -393,6 +409,9 @@ class DabPumpsApi:
     async def async_logout(self):
         """Logout from DAB Pumps"""
 
+        # Note: do not call 'async with self._login_lock' here.
+        # It will result in a deadlock as async_login calls async_logout from within its lock
+
         # Home Assistant will issue a warning when calling aclose() on the async aiohttp client.
         # Instead of closing we will simply forget all cookies. The result is that on a next
         # request, the client will act like it is a new one.
@@ -533,14 +552,14 @@ class DabPumpsApi:
         # Also detect the user role within this installation
         user_role = raw.get('user_role', 'CUSTOMER')
 
+        # Sanity check. # Never overwrite a known device_map, config_map or status_map with empty lists
+        if len(device_map) == 0:
+            raise DabPumpsApiDataError(f"No devices found for installation id {install_id}")
+
         # Cleanup device config and device statusses to only keep values that are still part of a device in this installation
         config_map = { k: v for k, v in self._config_map.items() if v.id in config_list }
         status_actual_map = { k: v for k, v in self._status_actual_map.items() if v.serial in serial_list }
         status_static_map = { k: v for k, v in self._status_static_map.items() if v.serial in serial_list }
-
-        # Sanity check. # Never overwrite a known device_map, config_map or status_map with empty lists
-        if len(device_map) == 0:
-            raise DabPumpsApiDataError(f"No devices found for installation id {install_id}")
 
         # Remember/update the found maps.
         self._device_map_ts = datetime.now()
@@ -742,7 +761,7 @@ class DabPumpsApi:
                 status_new = DabPumpsStatus(
                     serial = device.serial,
                     key = params.key,
-                    name = self.translate_string(params.key),
+                    name = self._translate_string(params.key),
                     code = code,
                     value = value,
                     unit = params.unit,
@@ -807,7 +826,7 @@ class DabPumpsApi:
                 status_new = DabPumpsStatus(
                     serial = serial,
                     key = item_key,
-                    name = self.translate_string(item_key),
+                    name = self._translate_string(item_key),
                     code = item_code,
                     value = item_val,
                     unit = item_unit,
@@ -830,6 +849,7 @@ class DabPumpsApi:
 
         # Cleanup statusses from this device that are no longer needed in _status_actual_map
         candidate_map = { k:v for k,v in self._status_actual_map.items() if v.serial == serial and not k in status_map }
+
         for status_key, status_old in candidate_map.items():
                 
             # Check if this status was recently updated via async_change_device_status
@@ -969,7 +989,7 @@ class DabPumpsApi:
         # Apply translations
         if translate and params is not None and params.values is not None:
             params_dict = params._asdict()
-            params_dict['values'] = { k:self.translate_string(v) for k,v in params.values.items() }
+            params_dict['values'] = { k:self._translate_string(v) for k,v in params.values.items() }
             params = DabPumpsParams(**params_dict)
 
         return params
@@ -991,7 +1011,7 @@ class DabPumpsApi:
         match params.type:
             case 'enum':
                 # Lookup value and translate
-                value = self.translate_string(params.values.get(code, code))
+                value = self._translate_string(params.values.get(code, code))
 
             case 'measure':
                 if code != '':
@@ -1055,7 +1075,7 @@ class DabPumpsApi:
         return code
     
 
-    def translate_string(self, str: str) -> str:
+    def _translate_string(self, str: str) -> str:
         """
         Return 'translated' string or original string if not found
         """
