@@ -216,11 +216,8 @@ class DabPumpsApi:
             # so we cannot not trust the expiry time in the token!
             # Instead we just check that the last login was not too long ago
             if epoch_now - self._login_time < DABPUMPS_API_LOGIN_TIME_VALID:
-                #_LOGGER.debug(f"Token reuse; login={self._login_time}, now={epoch_now}, exp={token_exp}, iat={token_iat}")
                 await self._async_update_diagnostics(datetime.now(), "token reuse", None, None, token_payload)
                 return
-            #else:
-                #_LOGGER.debug(f"Token renew; login={self._login_time}, now={epoch_now}, exp={token_exp}, iat={token_iat}")
             
             # if token_exp - epoch_now > DABPUMPS_API_TOKEN_TIME_MIN:
             #     # still valid for another 10 seconds
@@ -1119,7 +1116,9 @@ class DabPumpsApi:
                     _LOGGER.debug(error)    # logged as warning after last retry
 
                     # Force a logout to so next login will be a real login, not a token reuse
+                    # Also reset login_method so we will not keep trying a 'wrong' method.
                     await self.async_logout()
+                    self._login_method = None                    
                     raise DabPumpsApiRightsError(error)
                 else:
                     error = f"Unable to perform request, got response {res} {code} {msg} while trying to reach {request["url"]}"
