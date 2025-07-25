@@ -546,8 +546,6 @@ class DabPumpsApi:
         if len(device_map) == 0:
             raise DabPumpsApiDataError(f"No devices found for installation id {install_id}")
 
-        # Cleanup devices that are no longer part of this installation
-
         # Remember/update the found map.
         self._device_map_ts = datetime.now()
         self._device_map.update(device_map)
@@ -557,9 +555,17 @@ class DabPumpsApi:
         for key in candidate_list:
             self._device_map.pop(key, None)
 
-        # Remeber user role.
+        # Remember user role. This is only usefull when there is only one installation.
+        # Also, we override the user role as detected when retrieving the installation list
+        # as the value there sometimes seems incorrect
         self._user_role_ts = datetime.now()
         self._user_role = user_role
+
+        if install_id in self._install_map and self._install_map[install_id].role != user_role:
+            _LOGGER.debug(f"Override install role from '{self._install_map[install_id].role}' to '{user_role}' for installation id '{install_id}'")
+            install_dict = self._install_map[install_id]._asdict()
+            install_dict["role"] = user_role
+            self._install_map[install_id] = DabPumpsInstall(**install_dict)
 
         # Return data or raw or both
         match ret:
