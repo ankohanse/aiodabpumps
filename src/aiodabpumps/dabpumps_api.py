@@ -228,9 +228,8 @@ class DabPumpsApi:
             # else:
             #     _LOGGER.debug(f"Token expired; exp={token_exp}, now={epoch_now}")
 
-        # Make sure to have been logged out of previous sessions.
-        # DAB Pumps service does not handle multiple logins from same account very well
-        await self.async_logout()
+        # Clear any previous login cookies before trying any login methods
+        await self._async_logout(context="login")
         
         # We have four possible login methods that all seem to work for both DConnect (non-expired) and for DAB Live
         # First try the method that succeeded last time!
@@ -265,8 +264,8 @@ class DabPumpsApi:
             except Exception as ex:
                 error = ex
 
-            # Clear any login cookies before the next try
-            await self.async_logout()
+            # Clear any previous login cookies before trying the next method
+            await self._async_logout(context="login")
 
         # if we reached this point then all methods failed.
         if error:
@@ -406,14 +405,30 @@ class DabPumpsApi:
     async def async_logout(self):
         """Logout from DAB Pumps"""
 
+        # Only one thread at a time can check token cookie and do subsequent login or logout if needed.
+        # Once one thread is done, the next thread can then check the (new) token cookie.
+        async with self._login_lock:
+            await self._async_logout(context = "")
+
+
+    async def _async_logout(self, context: str):
         # Note: do not call 'async with self._login_lock' here.
-        # It will result in a deadlock as async_login calls async_logout from within its lock
+        # It will result in a deadlock as async_login calls _async_logout from within its lock
+
+        # Reduce amount of tracing to only when we are actually logged-in.
+        if self._login_time:
+            _LOGGER.debug(f"DAB Pumps logout")
 
         # Home Assistant will issue a warning when calling aclose() on the async aiohttp client.
         # Instead of closing we will simply forget all cookies. The result is that on a next
         # request, the client will act like it is a new one.
         await self._client.async_clear_cookies()
-        self._login_time = 0
+
+        # Do not clear login_method when called in a 'login' context, as it interferes with 
+        # the loop iterating all login methods.
+        if not context.startswith("login"):
+            self._login_method = None
+            self._login_time = 0
         
         
     async def async_fetch_install_list(self, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
@@ -1088,7 +1103,15 @@ class DabPumpsApi:
         request["headers"]['Connection'] = 'close'
 
         # Perform the request
-        (request,response) = await self._client.async_send_request(request)
+        try:
+            (request,response) = await self._client.async_send_request(request)
+        except Exception as ex:
+            error = f"Unable to perform request, got exception '{str(ex)}' while trying to reach {request["url"]}"
+            _LOGGER.debug(error)
+
+            # Force a logout to so next login will be a real login, not a token reuse
+            await self._async_logout(context)
+            raise DabPumpsApiConnectError(error)
 
         # Save the diagnostics if requested
         await self._async_update_diagnostics(timestamp, context, request, response)
@@ -1096,8 +1119,11 @@ class DabPumpsApi:
         # Check response
         if not response["success"]:
             error = f"Unable to perform request, got response {response["status"]} while trying to reach {request["url"]}"
-            _LOGGER.debug(error)    # logged as warning after last retry
-            raise DabPumpsApiError(error)
+            _LOGGER.debug(error)
+
+            # Force a logout to so next login will be a real login, not a token reuse
+            await self._async_logout(context)
+            raise DabPumpsApiConnectError(error)
 
         if "text" in response:
             return response["text"]
@@ -1113,16 +1139,14 @@ class DabPumpsApi:
                 
                 if code in ['FORBIDDEN']:
                     error = f"Authorization failed: {res} {code} {msg}"
-                    _LOGGER.debug(error)    # logged as warning after last retry
+                    _LOGGER.debug(error)
 
                     # Force a logout to so next login will be a real login, not a token reuse
-                    # Also reset login_method so we will not keep trying a 'wrong' method.
-                    await self.async_logout()
-                    self._login_method = None                    
+                    await self._async_logout(context)
                     raise DabPumpsApiRightsError(error)
                 else:
                     error = f"Unable to perform request, got response {res} {code} {msg} while trying to reach {request["url"]}"
-                    _LOGGER.debug(error)    # logged as warning after last retry
+                    _LOGGER.debug(error)
                     raise DabPumpsApiError(error)
 
             return json
@@ -1142,6 +1166,9 @@ class DabPumpsApi:
 
             self._diagnostics_callback(context, item, detail, data)
     
+
+class DabPumpsApiConnectError(Exception):
+    """Exception to indicate authentication failure."""
 
 class DabPumpsApiAuthError(Exception):
     """Exception to indicate authentication failure."""

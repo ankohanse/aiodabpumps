@@ -137,7 +137,7 @@ async def test_login_seq(name, usr, pwd, exp_except, request):
     "name, loop, exp_except",
     [
         ("data ok", 0, None),
-        # ("data loop", 200, None),
+        # ("data loop", 24*60, None),    # Run 1 full day
     ]
 )
 async def test_get_data(name, loop, exp_except, request):
@@ -197,13 +197,17 @@ async def test_get_data(name, loop, exp_except, request):
             assert type(param) is DabPumpsParams
             assert param.key is not None
 
-    for idx in range(loop+1):
+    counter_success: int = 0
+    counter_fail: int = 0
+    reason_fail: dict[str,int] = {}
+    for idx in range(1,loop+1):
         # Get device statusses
         try:
             # Check cookie and re-login if needed
             await context.api.async_login()
 
-            await context.api.async_fetch_device_statusses(device_serial)
+            for device_serial,device in context.api.device_map.items():
+                await context.api.async_fetch_device_statusses(device_serial)
 
             assert context.api.status_map is not None
             assert type(context.api.status_map) is dict
@@ -215,15 +219,22 @@ async def test_get_data(name, loop, exp_except, request):
                 assert status.serial is not None
                 assert status.key is not None
                 assert status.name is not None
+
+            counter_success += 1
         
-        except DabPumpsApiRightsError:
-            await context.api.async_logout()
-        except:
-            continue
+        except Exception as ex:
+            counter_fail += 1
+            reason = str(ex)
+            reason_fail[reason] = reason_fail[reason]+1 if reason in reason_fail else 1
+            _LOGGER.warning(f"Fail: {ex}")
 
         if loop:
             await asyncio.sleep(60)
-            _LOGGER.debug(f"Loop test, {idx} of {loop}")
+            _LOGGER.debug(f"Loop test, {idx} of {loop} (success={counter_success}, fail={counter_fail})")
+
+    _LOGGER.info(f"Fail summary after {loop} loops:")
+    for reason,count in reason_fail.items():
+        _LOGGER.info(f"  {count}x {reason}")
 
 
 @pytest.mark.asyncio
