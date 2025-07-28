@@ -256,7 +256,7 @@ class DabPumpsApi:
 
                 # if we reached this point then a login method succeeded
                 # keep using this client and its cookies and remember which method had success
-                _LOGGER.debug(f"DAB Pumps login succeeded using method {method}")
+                _LOGGER.debug(f"Login succeeded using method {method}")
                 self._login_method = method
                 self._login_time = time.time()
                 return 
@@ -292,7 +292,7 @@ class DabPumpsApi:
             },
         }
         
-        _LOGGER.debug(f"DAB Pumps login for '{self._username}' via {request["method"]} {request["url"]} with isDabLive={isDabLive}")
+        _LOGGER.debug(f"Login for '{self._username}' via {request["method"]} {request["url"]} with isDabLive={isDabLive}")
         result = await self._async_send_request(context, request)
 
         token = result.get('access_token') or ""
@@ -327,7 +327,7 @@ class DabPumpsApi:
             },
         }
         
-        _LOGGER.debug(f"DAB Pumps login for '{self._username}' via {request["method"]} {request["url"]}")
+        _LOGGER.debug(f"Login for '{self._username}' via {request["method"]} {request["url"]}")
         result = await self._async_send_request(context, request)
 
         token = result.get('access_token') or ""
@@ -347,7 +347,7 @@ class DabPumpsApi:
             },
         }
 
-        _LOGGER.debug(f"DAB Pumps validate token via {request["method"]} {request["url"]}")
+        _LOGGER.debug(f"Validate token via {request["method"]} {request["url"]}")
         result = await self._async_send_request(context, request)
 
         # if we reach this point then the token was OK
@@ -365,7 +365,7 @@ class DabPumpsApi:
             "url": DABPUMPS_API_URL,
         }
 
-        _LOGGER.debug(f"DAB Pumps retrieve login page via GET {request["url"]}")
+        _LOGGER.debug(f"Retrieve login page via GET {request["url"]}")
         text = await self._async_send_request(context, request)
         
         match = re.search(r'action\s?=\s?\"(.*?)\"', text, re.MULTILINE)
@@ -388,7 +388,7 @@ class DabPumpsApi:
             },
         }
         
-        _LOGGER.debug(f"DAB Pumps login for '{self._username}' via {request["method"]} {request["url"]}")
+        _LOGGER.debug(f"Login for '{self._username}' via {request["method"]} {request["url"]}")
         await self._async_send_request(context, request)
 
         # Verify the client access_token cookie has been set
@@ -417,7 +417,7 @@ class DabPumpsApi:
 
         # Reduce amount of tracing to only when we are actually logged-in.
         if self._login_time:
-            _LOGGER.debug(f"DAB Pumps logout")
+            _LOGGER.debug(f"Logout")
 
         # Home Assistant will issue a warning when calling aclose() on the async aiohttp client.
         # Instead of closing we will simply forget all cookies. The result is that on a next
@@ -443,7 +443,7 @@ class DabPumpsApi:
                 "url": DABPUMPS_API_URL + '/api/v1/installation',
             }
 
-            _LOGGER.debug(f"DAB Pumps retrieve installation list for '{self._username}' via {request["method"]} {request["url"]}")
+            _LOGGER.debug(f"Retrieve installation list for '{self._username}' via {request["method"]} {request["url"]}")
             raw = await self._async_send_request(context, request)  
 
         # Process the resulting raw data
@@ -455,7 +455,7 @@ class DabPumpsApi:
             install_id = installation.get('installation_id', '')
             install_name = installation.get('name', None) or installation.get('description', None) or f"installation {install_idx}"
 
-            _LOGGER.debug(f"DAB Pumps installation found: {install_name}")
+            _LOGGER.debug(f"Installation found: {install_name}")
             install = DabPumpsInstall(
                 id = install_id,
                 name = install_name,
@@ -511,7 +511,7 @@ class DabPumpsApi:
                 "url": DABPUMPS_API_URL + f"/api/v1/installation/{install_id}",
             }
             
-            _LOGGER.debug(f"DAB Pumps retrieve installation details via {request["method"]} {request["url"]}")
+            _LOGGER.debug(f"Retrieve installation details via {request["method"]} {request["url"]}")
             raw = await self._async_send_request(context, request)
 
         # Process the resulting raw data
@@ -549,7 +549,7 @@ class DabPumpsApi:
             )
             device_map[dum_serial] = device
             
-            _LOGGER.debug(f"DAB Pumps device found: {dum_name} with serial {dum_serial}")
+            _LOGGER.debug(f"Device found: {dum_name} with serial {dum_serial}")
             
         # Also detect the user role within this installation
         user_role = raw.get('user_role', 'CUSTOMER')
@@ -641,7 +641,7 @@ class DabPumpsApi:
                 # or    DABPUMPS_API_URL + f"/api/v1/configure/paramsDefinition?version=0&doc={config_name}",
             }
             
-            _LOGGER.debug(f"DAB Pumps retrieve device config for '{config_id}' via {request["method"]} {request["url"]}")
+            _LOGGER.debug(f"Retrieve device config for '{config_id}' via {request["method"]} {request["url"]}")
             raw = await self._async_send_request(context, request)
 
         # Process the resulting raw data
@@ -701,7 +701,7 @@ class DabPumpsApi:
         if len(config_map) == 0:
             raise DabPumpsApiDataError(f"No config found for '{config_id}'")
         
-        _LOGGER.debug(f"DAB Pumps configuration found: {conf_name} with {len(conf_params)} metadata params")        
+        _LOGGER.debug(f"Configuration found: {conf_name} with {len(conf_params)} metadata params")        
 
         # Merge with configurations from other devices
         self._config_map_ts = datetime.now()
@@ -794,7 +794,7 @@ class DabPumpsApi:
                 # or   DABPUMPS_API_URL + f"/api/v1/dum/{serial}/state",
             }
             
-            _LOGGER.debug(f"DAB Pumps retrieve device statusses for '{serial}' via {request["method"]} {request["url"]}")
+            _LOGGER.debug(f"Retrieve device statusses for '{serial}' via {request["method"]} {request["url"]}")
             raw = await self._async_send_request(context, request)
         
         # Process the resulting raw data
@@ -848,7 +848,7 @@ class DabPumpsApi:
         if len(status_map) == 0:
             raise DabPumpsApiDataError(f"No statusses found for '{serial}'")
         
-        _LOGGER.debug(f"DAB Pumps statusses found for '{serial}' with {len(status_map)} values")
+        _LOGGER.debug(f"Statusses found for '{serial}' with {len(status_map)} values")
 
         # Merge with statusses from other devices
         self._status_actual_map_ts = datetime.now()
@@ -929,7 +929,7 @@ class DabPumpsApi:
             },
         }
         
-        _LOGGER.debug(f"DAB Pumps set device param for '{status.serial}:{status.key}' to '{value}' via {request["method"]} {request["url"]}")
+        _LOGGER.debug(f"Set device param for '{status.serial}:{status.key}' to '{value}' via {request["method"]} {request["url"]}")
         raw = await self._async_send_request(context, request)
         
         # If no exception was thrown then the operation was successfull
@@ -947,7 +947,7 @@ class DabPumpsApi:
                 "url": DABPUMPS_API_URL + f"/resources/js/localization_{lang}.properties?format=JSON",
             }
             
-            _LOGGER.debug(f"DAB Pumps retrieve language info via {request["method"]} {request["url"]}")
+            _LOGGER.debug(f"Retrieve language info via {request["method"]} {request["url"]}")
             raw = await self._async_send_request(context, request)
 
         # Process the resulting raw data
@@ -959,7 +959,7 @@ class DabPumpsApi:
         if len(string_map) == 0:
             raise DabPumpsApiDataError(f"No strings found in data")
 
-        _LOGGER.debug(f"DAB Pumps strings found: {len(string_map)} in language '{language}'")
+        _LOGGER.debug(f"Strings found: {len(string_map)} in language '{language}'")
         
         # Remember this data
         self._string_map_ts = datetime.now() if len(string_map) > 0 else datetime.min
