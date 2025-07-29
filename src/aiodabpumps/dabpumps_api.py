@@ -313,10 +313,9 @@ class DabPumpsApi:
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
             "data": {
-                'code': self._refresh_token, 
-                'grant_type': 'refresh_code',
+                'refresh_token': self._refresh_token, 
+                'grant_type': 'refresh_token',
                 'redirect_uri': H2D_REDIRECT_URI,
-                'code_verifier': self._openid_code_verifier,
                 'client_id': H2D_CLIENT_ID,
             },
         }
