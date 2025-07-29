@@ -144,6 +144,7 @@ class DabPumpsClient_Aiohttp(DabPumpsClient_Base):
         """
         # Perform the aiohttp request
         timestamp = datetime.now()
+        flags = request.get("flags", {})
 
         async with self._clientsession.request(
             method = request["method"], 
@@ -152,6 +153,7 @@ class DabPumpsClient_Aiohttp(DabPumpsClient_Base):
             data = request.get("data", None), 
             json = request.get("json", None), 
             headers = request.get("headers", None),
+            allow_redirects = flags.get("redirects", True)
         ) as rsp:
 
             # Remember actual requests and response params, used for diagnostics

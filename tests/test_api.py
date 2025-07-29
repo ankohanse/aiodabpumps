@@ -1,5 +1,6 @@
 import asyncio
 import copy
+from datetime import datetime
 import logging
 import pytest
 import pytest_asyncio
@@ -47,6 +48,7 @@ async def context():
 
     # cleanup
     await ctx.cleanup()
+
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("context")
@@ -125,6 +127,57 @@ async def test_login_seq(name, usr, pwd, exp_except, request):
         assert len(context.api.config_map) == 0
         assert len(context.api.status_map) == 0
         assert len(context.api.string_map) == 0
+
+    else:
+        with pytest.raises(exp_except):
+            await context.api.async_login()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("context")
+@pytest.mark.parametrize(
+    "name, method, usr, pwd, exp_except",
+    [
+        ("ok",   'H2D_app',       TEST_USERNAME, TEST_PASSWORD, None),
+        ("ok",   'DabLive_app_0', TEST_USERNAME, TEST_PASSWORD, None),
+        ("ok",   'DabLive_app_1', TEST_USERNAME, TEST_PASSWORD, None),
+        ("ok",   'DConnect_app',  TEST_USERNAME, TEST_PASSWORD, None),
+        ("ok",   'DConnect_web',  TEST_USERNAME, TEST_PASSWORD, None),
+        ("fail", 'H2D_app',       "dummy_usr",   "wrong_pwd",   DabPumpsApiAuthError),
+        ("fail", 'DabLive_app_0', "dummy_usr",   "wrong_pwd",   DabPumpsApiAuthError),
+        ("fail", 'DabLive_app_1', "dummy_usr",   "wrong_pwd",   DabPumpsApiAuthError),
+        ("fail", 'DConnect_app',  "dummy_usr",   "wrong_pwd",   DabPumpsApiAuthError),
+        ("fail", 'DConnect_web',  "dummy_usr",   "wrong_pwd",   DabPumpsApiAuthError),
+    ]
+)
+async def test_login_methods(name, method, usr, pwd, exp_except, request):
+    context = request.getfixturevalue("context")
+    assert context.api is None
+
+    context.api = DabPumpsApi(usr, pwd)
+    assert context.api.closed == False
+
+    if exp_except is None:
+        assert context.api.login_method is None
+
+        match method:
+            case 'H2D_app':
+                await context.api._async_login_h2d_app()
+
+            case 'DabLive_app_0':
+                await context.api._async_login_dablive_app(isDabLive=0)
+
+            case 'DabLive_app_1':
+                await context.api._async_login_dablive_app(isDabLive=1)
+
+            case 'DConnect_app':
+                await context.api._async_login_dconnect_app()
+
+            case 'DConnect_web':
+                await context.api._async_login_dconnect_web()
+
+        assert context.api._access_token is not None
+        assert context.api._access_expiry > datetime.min
 
     else:
         with pytest.raises(exp_except):
