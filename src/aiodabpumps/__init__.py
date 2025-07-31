@@ -6,7 +6,6 @@ from .dabpumps_api import (
     DabPumpsParams,
     DabPumpsStatus,
     DabPumpsApiAuthError, 
-    DabPumpsApiRightsError,
     DabPumpsApiDataError, 
     DabPumpsApiError, 
     DabPumpsApiHistoryItem, 

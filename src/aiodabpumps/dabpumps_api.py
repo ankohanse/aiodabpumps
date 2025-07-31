@@ -16,7 +16,7 @@ import time
 
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 from urllib.parse import urlparse, parse_qs
 from yarl import URL
@@ -34,7 +34,6 @@ from .dabpumps_const import (
     DABPUMPS_API_ACCESS_TOKEN_COOKIE,
     DABPUMPS_API_ACCESS_TOKEN_VALID,
     DABPUMPS_API_TOKEN_TIME_MIN,
-    API_LOGIN,
     DEVICE_ATTR_EXTRA,
     DEVICE_STATUS_STATIC,
     H2D_CLIENT_ID,
@@ -55,6 +54,15 @@ DabPumpsDevice = namedtuple('DabPumpsDevice', 'id, serial, name, vendor, product
 DabPumpsConfig = namedtuple('DabPumpsConfig', 'id, label, description, meta_params')
 DabPumpsParams = namedtuple('DabPumpsParams', 'key, type, unit, weight, values, min, max, family, group, view, change, log, report')
 DabPumpsStatus = namedtuple('DabPumpsStatus', 'serial, key, name, code, value, unit, status_ts, update_ts')
+
+class DabPumpsLogin(StrEnum):
+    ACCESS_TOKEN = 'Access_token'
+    REFRESH_TOKEN = 'Refresh_token'
+    H2D_APP = 'H2D_app'
+    DABLIVE_APP_0 = 'DabLive_app_0'
+    DABLIVE_APP_1 = 'DabLive_app_1'
+    DCONNECT_APP = 'DConnect_app'
+    DCONNECT_WEB = 'DConnect_web'
 
 class DabPumpsRet(Enum):
     NONE = 0
@@ -216,32 +224,34 @@ class DabPumpsApi:
         """Login to DAB Pumps by trying each of the possible login methods"""        
 
         # We have four possible login methods that all seem to work for both DConnect (non-expired) and for DAB Live
-        # First try to keep using the access token or refresh that token.
-        # Next, try the method that succeeded last time!
+        # First try to keep using the access token
+        # Next, try to refresh that token.
+        # Then, try the method that succeeded last time!
+        # Finally try all logig methods
         error = None
-        methods = [API_LOGIN.ACCESS_TOKEN, API_LOGIN.REFRESH_TOKEN, self._login_method, API_LOGIN.H2D_APP, API_LOGIN.DABLIVE_APP_1, API_LOGIN.DABLIVE_APP_0, API_LOGIN.DCONNECT_APP, API_LOGIN.DCONNECT_WEB]
+        methods = [DabPumpsLogin.ACCESS_TOKEN, DabPumpsLogin.REFRESH_TOKEN, self._login_method, DabPumpsLogin.H2D_APP, DabPumpsLogin.DABLIVE_APP_1, DabPumpsLogin.DABLIVE_APP_0, DabPumpsLogin.DCONNECT_APP, DabPumpsLogin.DCONNECT_WEB]
         for method in methods:
             try:
                 match method:
-                    case API_LOGIN.ACCESS_TOKEN:
+                    case DabPumpsLogin.ACCESS_TOKEN:
                         # Try to keep using the Access Token
                         await self._async_login_access_token()
-                    case API_LOGIN.REFRESH_TOKEN:
+                    case DabPumpsLogin.REFRESH_TOKEN:
                         # Try to refresh the token
                         await self._async_login_refresh_token()
-                    case API_LOGIN.H2D_APP:
+                    case DabPumpsLogin.H2D_APP:
                         # Try the procedure of the H2D app (most up to date)
                         await self._async_login_h2d_app()
-                    case API_LOGIN.DABLIVE_APP_1: 
+                    case DabPumpsLogin.DABLIVE_APP_1: 
                         # Try the simplest method
                         await self._async_login_dablive_app(isDabLive=1)
-                    case API_LOGIN.DABLIVE_APP_0:
+                    case DabPumpsLogin.DABLIVE_APP_0:
                         # Try the alternative simplest method
                         await self._async_login_dablive_app(isDabLive=0)
-                    case API_LOGIN.DCONNECT_APP:
+                    case DabPumpsLogin.DCONNECT_APP:
                         # Try the method that uses 2 steps
                         await self._async_login_dconnect_app()
-                    case API_LOGIN.DCONNECT_WEB:
+                    case DabPumpsLogin.DCONNECT_WEB:
                         # Finally try the most complex and unreliable one
                         await self._async_login_dconnect_web()
                     case _:
@@ -249,10 +259,13 @@ class DabPumpsApi:
                         continue
 
                 # if we reached this point then a login method succeeded
-                # keep using this client and its cookies and remember which method had success
                 _LOGGER.debug(f"Login succeeded using method {method}")
-                self._login_method = method
-                self._login_time = time.time()
+
+                if method not in [DabPumpsLogin.ACCESS_TOKEN, DabPumpsLogin.REFRESH_TOKEN]:
+                    # Remember which login method succeeded
+                    self._login_time = time.time()
+                    self._login_method = method
+
                 return 
             
             except Exception as ex:
@@ -271,6 +284,12 @@ class DabPumpsApi:
 
         context = f"login access_token reuse"
 
+        if self._login_method in [DabPumpsLogin.H2D_APP]:
+            # Never check access token, always continue to the next login method (token refresh)
+            raise DabPumpsApiAuthError(f"force refresh of access-token" )
+
+        # else (login_method in [DabPumpsLogin.DABLIVE_APP0/1, DabPumpsLogin.DCONNECT_APP, DabpumpsLogin.DCONNECT_WEB])        
+        # Get access token from cookie
         access_token = await self._client.async_get_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE)
         if not access_token:
             error = f"Access token not found"      
@@ -335,13 +354,16 @@ class DabPumpsApi:
         
         # Store returned access-token as cookie so it will automatically be passed in next calls
         await self._client.async_set_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE, access_token)
-
-        self._access_token = access_token
-        self._access_expiry = datetime.now() + timedelta(seconds=access_expires_in)
-
+        
+        if access_token:
+            self._access_token = access_token
+            self._access_expiry = datetime.now() + timedelta(seconds=access_expires_in)
+        
         if refresh_token:
             self._refresh_token = refresh_token
             self._refresh_expiry = datetime.now() + timedelta(seconds=refresh_expires_in)
+
+
 
         await self._async_update_diagnostics(datetime.now(), context, None, None, token_payload)
 
@@ -450,8 +472,9 @@ class DabPumpsApi:
         # Store returned access-token as cookie so it will automatically be passed in next calls
         await self._client.async_set_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE, access_token)
 
-        self._access_token = access_token
-        self._access_expiry = datetime.now() + timedelta(seconds = access_expires_in)
+        if access_token:
+            self._access_token = access_token
+            self._access_expiry = datetime.now() + timedelta(seconds = access_expires_in)
 
         if refresh_token:
             self._refresh_token = refresh_token
@@ -489,10 +512,11 @@ class DabPumpsApi:
 
         # if we reach this point then the token was OK
         # Store returned access-token as cookie so it will automatically be passed in next calls
+        # No need to remember access-token, we never need to pass it as header with this login method
         await self._client.async_set_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE, access_token)
 
-        self._access_token = access_token
-        self._access_expiry = datetime.now() + timedelta(seconds=DABPUMPS_API_ACCESS_TOKEN_VALID)
+        self._access_token = None
+        self._access_expiry = datetime.min
         self._refresh_token = None
         self._refresh_expiry = datetime.min
 
@@ -543,10 +567,11 @@ class DabPumpsApi:
 
         # if we reach this point then the token was OK
         # Store returned access-token as cookie so it will automatically be passed in next calls
+        # No need to remember access-token, we never need to pass it as header with this login method
         await self._client.async_set_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE, access_token)
 
-        self._access_token = access_token
-        self._access_expiry = datetime.now() + timedelta(seconds = DABPUMPS_API_ACCESS_TOKEN_VALID)
+        self._access_token = None
+        self._access_expiry = datetime.min
         self._refresh_token = None
         self._refresh_expiry = datetime.min
 
@@ -598,9 +623,12 @@ class DabPumpsApi:
             raise DabPumpsApiAuthError(error)
 
         # if we reach this point without exceptions then login was successfull
-        # client access_token is already set by the last call
-        self._access_token = access_token
-        self._access_expiry = datetime.now() + timedelta(seconds = DABPUMPS_API_ACCESS_TOKEN_VALID)
+        # Cookie for access_token is already set by the last call
+        # No need to remember access-token, we never need to pass it as header with this login method
+        await self._client.async_set_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE, access_token)
+
+        self._access_token = None
+        self._access_expiry = datetime.min
         self._refresh_token = None
         self._refresh_expiry = datetime.min
 
@@ -629,9 +657,9 @@ class DabPumpsApi:
         self._access_token = None
         self._access_expiry = datetime.min
 
-        # Do not clear login_method when called in a 'login' context and when we were 
+        # Do not clear refresh token when called in a 'login' context and when we were 
         # only checking the access_token
-        if not context.startswith("login") or method not in [API_LOGIN.ACCESS_TOKEN]:
+        if not context.startswith("login") or method not in [DabPumpsLogin.ACCESS_TOKEN]:
             self._refresh_token = None
             self._refresh_expiry = datetime.min
 
@@ -1378,7 +1406,10 @@ class DabPumpsApi:
 
             # Force a logout to so next login will be a real login, not a token reuse
             await self._async_logout(context)
-            raise DabPumpsApiConnectError(error)
+            if "401" in response["status"]:
+                raise DabPumpsApiAuthError(error)
+            else:
+                raise DabPumpsApiConnectError(error)
         
         if request["flags"].get("redirects",None) == False and response['status'].startswith("302"):
             return response["headers"].get("location", '')
@@ -1395,13 +1426,13 @@ class DabPumpsApi:
                 code = json.get('code', '')
                 msg = json.get('msg', '')
                 
-                if code in ['FORBIDDEN']:
+                if code.upper() in ['FORBIDDEN', 'WRONGCREDENTIAL']:
                     error = f"Authorization failed: {res} {code} {msg}"
                     _LOGGER.debug(error)
 
                     # Force a logout to so next login will be a real login, not a token reuse
                     await self._async_logout(context)
-                    raise DabPumpsApiRightsError(error)
+                    raise DabPumpsApiAuthError(error)
                 else:
                     error = f"Unable to perform request, got response {res} {code} {msg} while trying to reach {request["url"]}"
                     _LOGGER.debug(error)
@@ -1429,10 +1460,7 @@ class DabPumpsApiConnectError(Exception):
     """Exception to indicate authentication failure."""
 
 class DabPumpsApiAuthError(Exception):
-    """Exception to indicate authentication failure."""
-
-class DabPumpsApiRightsError(Exception):
-    """Exception to indicate authorization failure"""
+    """Exception to indicate authentication or authorization failure."""
 
 class DabPumpsApiError(Exception):
     """Exception to indicate generic error failure."""    

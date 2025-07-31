@@ -19,15 +19,6 @@ DABPUMPS_DEFAULT_TRANSLATIONS_URL = 'https://dconnect.dabpumps.com/resources/js/
 H2D_REDIRECT_URI = 'dabiopapp://Welcome'
 H2D_CLIENT_ID = 'h2d-mobile'
 
-API_LOGIN = types.SimpleNamespace()
-API_LOGIN.ACCESS_TOKEN = 'Access_token'
-API_LOGIN.REFRESH_TOKEN = 'Refresh_token'
-API_LOGIN.H2D_APP = 'H2D_app'
-API_LOGIN.DABLIVE_APP_0 = 'DabLive_app_0'
-API_LOGIN.DABLIVE_APP_1 = 'DabLive_app_1'
-API_LOGIN.DCONNECT_APP = 'DConnect_app'
-API_LOGIN.DCONNECT_WEB = 'DConnect_web'
-
 # Period to prevent status updates when value was recently updated
 STATUS_UPDATE_HOLD = 30 # seconds
 
