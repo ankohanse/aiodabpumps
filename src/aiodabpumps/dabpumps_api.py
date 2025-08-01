@@ -5,6 +5,7 @@ import copy
 import hashlib
 import math
 import os
+import warnings
 import aiohttp
 import asyncio
 import httpx
@@ -23,21 +24,24 @@ from yarl import URL
 
 
 from .dabpumps_const import (
-    DABCS_INIT_URL,
-    DABPUMPS_API_REFRESH_TOKEN_VALID,
-    DABPUMPS_DEFAULT_CLIENT_ID,
-    DABPUMPS_DEFAULT_TRANSLATIONS_URL,
     DABPUMPS_SSO_URL,
-    DABPUMPS_API_URL,
-    DABPUMPS_API_DOMAIN,
-    DABPUMPS_API_LOGIN_TIME_VALID,
-    DABPUMPS_API_ACCESS_TOKEN_COOKIE,
-    DABPUMPS_API_ACCESS_TOKEN_VALID,
-    DABPUMPS_API_TOKEN_TIME_MIN,
+    DCONNECT_API_URL,
+    DCONNECT_API_DOMAIN,
+    DCONNECT_ACCESS_TOKEN_COOKIE,
+    DCONNECT_ACCESS_TOKEN_VALID,
+    DCONNECT_REFRESH_TOKEN_VALID,
+    DABCS_INIT_URL,
+    DABCS_API_URL,
+    DABCS_ACCESS_TOKEN_VALID,
+    DABCS_REFRESH_TOKEN_VALID,
     DEVICE_ATTR_EXTRA,
     DEVICE_STATUS_STATIC,
-    H2D_CLIENT_ID,
-    H2D_REDIRECT_URI,
+    H2D_APP_REDIRECT_URI,
+    H2D_APP_CLIENT_ID,
+    H2D_APP_CLIENT_SECRET,
+    DCONNECT_APP_CLIENT_ID,
+    DCONNECT_APP_CLIENT_SECRET,
+    DCONNECT_APP_USER_AGENT,
     STATUS_UPDATE_HOLD,
 )
 
@@ -64,6 +68,14 @@ class DabPumpsLogin(StrEnum):
     DCONNECT_APP = 'DConnect_app'
     DCONNECT_WEB = 'DConnect_web'
 
+class DabPumpsFetch(StrEnum):
+    DABCS = 'DabCS',
+    DCONNECT = "DConnect"
+
+class DabPumpsAuth(StrEnum):
+    HEADER = "Authorization Header"
+    COOKIE = "Cookie"
+
 class DabPumpsRet(Enum):
     NONE = 0
     DATA = 1
@@ -79,9 +91,21 @@ class DabPumpsApi:
         self._username: str = username
         self._password: str = password
 
-        # Retrieved data
-        self._login_method: str|None = None
+        # Login data
         self._login_time: float = 0
+        self._login_method: DabPumpsLogin|None = None
+        self._fetch_method: DabPumpsFetch|None = None
+        self._auth_method: DabPumpsAuth|None = None
+        self._extra_headers = {}
+
+        self._access_token: str|None = None
+        self._access_expiry: datetime = datetime.min
+        self._refresh_token: str|None = None
+        self._refresh_expiry: datetime = datetime.min
+        self._openid_client_id = None
+        self._openid_client_secret = None
+
+        # Retrieved data
         self._install_map: dict[str, DabPumpsInstall] = {}
         self._device_map: dict[str, DabPumpsDevice] = {}
         self._config_map: dict[str, DabPumpsConfig] = {}
@@ -260,12 +284,6 @@ class DabPumpsApi:
 
                 # if we reached this point then a login method succeeded
                 _LOGGER.debug(f"Login succeeded using method {method}")
-
-                if method not in [DabPumpsLogin.ACCESS_TOKEN, DabPumpsLogin.REFRESH_TOKEN]:
-                    # Remember which login method succeeded
-                    self._login_time = time.time()
-                    self._login_method = method
-
                 return 
             
             except Exception as ex:
@@ -284,20 +302,24 @@ class DabPumpsApi:
 
         context = f"login access_token reuse"
 
-        if self._login_method in [DabPumpsLogin.H2D_APP]:
-            # Never check access token, always continue to the next login method (token refresh)
+        if self._auth_method == DabPumpsAuth.COOKIE:
+            # No need to check access_token; the cookie is automatically refreshed during periodic calls
+            return
+
+        # Continue below for DabPumpsAuth.HEADER
+
+        if self._refresh_token:
+            # Never check access token of we have a refresh token, 
+            # instead continue to the next login method (token refresh)
             raise DabPumpsApiAuthError(f"force refresh of access-token" )
 
-        # else (login_method in [DabPumpsLogin.DABLIVE_APP0/1, DabPumpsLogin.DCONNECT_APP, DabpumpsLogin.DCONNECT_WEB])        
-        # Get access token from cookie
-        access_token = await self._client.async_get_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE)
-        if not access_token:
+        if not self._access_token:
             error = f"Access token not found"      
-            _LOGGER.debug(error)    # logged as warning after last retry
+            _LOGGER.debug(error)
             raise DabPumpsApiAuthError(error)
             
-        token_payload = jwt.decode(jwt=access_token, options={"verify_signature": False})
-        epoch_exp = token_payload.get("exp", 0)
+        old_access_token_payload = jwt.decode(jwt=self._access_token, options={"verify_signature": False})
+        epoch_exp = old_access_token_payload.get("exp", 0)
         epoch_now = time.time()
 
         # The DAB Pumps server UTC time is observed to be out by an hour (either before or behind), 
@@ -307,7 +329,7 @@ class DabPumpsApi:
             _LOGGER.debug(error)    # logged as warning after last retry
             raise DabPumpsApiAuthError(error)
 
-        await self._async_update_diagnostics(datetime.now(), context, None, None, token_payload)
+        await self._async_update_diagnostics(datetime.now(), context, None, None, old_access_token_payload)
 
 
     async def _async_login_refresh_token(self):
@@ -315,12 +337,16 @@ class DabPumpsApi:
 
         context = f"login access_token refresh"
 
+        if self._auth_method == DabPumpsAuth.COOKIE:
+            # No need to check refresh_token; the cookie is automatically updated during periodic calls
+            return
+
         if not self._refresh_token:
             error = f"Refresh token not found"      
-            _LOGGER.debug(error)    # logged as warning after last retry
+            _LOGGER.debug(error)
             raise DabPumpsApiAuthError(error)
 
-        token_payload = jwt.decode(jwt=self._refresh_token, options={"verify_signature": False})
+        old_refresh_token_payload = jwt.decode(jwt=self._refresh_token, options={"verify_signature": False})
 
         # Don't bother to check the contents of the refresh token, 
         # just attempt to request a new access token via the refresh token
@@ -332,10 +358,10 @@ class DabPumpsApi:
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
             "data": {
-                'refresh_token': self._refresh_token, 
                 'grant_type': 'refresh_token',
-                'redirect_uri': H2D_REDIRECT_URI,
-                'client_id': H2D_CLIENT_ID,
+                'refresh_token': self._refresh_token, 
+                'client_id': self._openid_client_id,
+                'client_secret': self._openid_client_secret or ""
             },
         }
         
@@ -344,28 +370,28 @@ class DabPumpsApi:
 
         access_token = result.get('access_token') or ""
         refresh_token = result.get('refresh_token') or ""
-        access_expires_in = result.get('expires_in') or DABPUMPS_API_ACCESS_TOKEN_VALID
-        refresh_expires_in = result.get('refresh_expires_in') or DABPUMPS_API_REFRESH_TOKEN_VALID
+        access_expires_in = result.get('expires_in') or DCONNECT_ACCESS_TOKEN_VALID
+        refresh_expires_in = result.get('refresh_expires_in') or DCONNECT_REFRESH_TOKEN_VALID
 
         if not access_token:
             error = f"No tokens found in response from {request["url"]}"
             _LOGGER.debug(error)    # logged as warning after last retry
             raise DabPumpsApiAuthError(error)
         
-        # Store returned access-token as cookie so it will automatically be passed in next calls
-        await self._client.async_set_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE, access_token)
+        if refresh_token == "NOTIMPLEMENTEDYET":
+            refresh_token = None
+            refresh_expires_in = 0
         
-        if access_token:
-            self._access_token = access_token
-            self._access_expiry = datetime.now() + timedelta(seconds=access_expires_in)
+        # Store access-token as cookie so it will be passed in next calls to DCONNECT if needed
+        # Store access-token in variable so it will be added as Authorization header in calls to DABCS
+        #await self._client.async_set_cookie(DCONNECT_API_DOMAIN, DCONNECT_API_ACCESS_TOKEN_COOKIE, access_token)
         
-        if refresh_token:
-            self._refresh_token = refresh_token
-            self._refresh_expiry = datetime.now() + timedelta(seconds=refresh_expires_in)
+        self._access_token = access_token
+        self._refresh_token = refresh_token
+        self._access_expiry = datetime.now() + timedelta(seconds=access_expires_in)
+        self._refresh_expiry = datetime.now() + timedelta(seconds=refresh_expires_in)
 
-
-
-        await self._async_update_diagnostics(datetime.now(), context, None, None, token_payload)
+        await self._async_update_diagnostics(datetime.now(), context, None, None, old_refresh_token_payload)
 
 
     async def _async_login_h2d_app(self):
@@ -380,19 +406,22 @@ class DabPumpsApi:
         openid_hashed_verifier = hashlib.sha256(openid_code_verifier.encode('utf-8')).digest()
         openid_code_challenge = base64.urlsafe_b64encode(openid_hashed_verifier).decode('utf-8').rstrip('=')
 
+        openid_client_id = H2D_APP_CLIENT_ID
+        openid_client_secret = H2D_APP_CLIENT_SECRET
+
         # Step 1: get login url
         context = f"login H2D_app openid-connect auth"
         request = {
             "method": "GET",
             "url": DABPUMPS_SSO_URL + '/auth/realms/dwt-group/protocol/openid-connect/auth',
             'params': {
-                'redirect_uri': H2D_REDIRECT_URI,
-                'client_id': H2D_CLIENT_ID,
+                'client_id': openid_client_id,
                 'response_type': 'code',
-                'state': openid_state_req,
-                'scope': 'openid profile email phone',
                 'code_challenge': openid_code_challenge,
                 'code_challenge_method': 'S256',
+                'state': openid_state_req,
+                'scope': 'openid profile email phone',
+                'redirect_uri': H2D_APP_REDIRECT_URI,
             },
         }
 
@@ -426,7 +455,7 @@ class DabPumpsApi:
         location_str = await self._async_send_request(context, request)
 
         # Returned value is a redirect location containing state and session_state
-        if not location_str.startswith(H2D_REDIRECT_URI) or not "code=" in text:
+        if not location_str.startswith(H2D_APP_REDIRECT_URI) or not "code=" in text:
             error = f"Unexpected response while authenticating from {request["url"]}: {text}"
             _LOGGER.debug(error)    # logged as warning after last retry
             raise DabPumpsApiAuthError(error)
@@ -447,38 +476,49 @@ class DabPumpsApi:
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
             "data": {
-                'code': openid_code, 
                 'grant_type': 'authorization_code',
-                'redirect_uri': H2D_REDIRECT_URI,
+                'code': openid_code, 
                 'code_verifier': openid_code_verifier,
-                'client_id': H2D_CLIENT_ID,
+                'client_id': openid_client_id,
+                'redirect_uri': H2D_APP_REDIRECT_URI,
             },
         }
         
         _LOGGER.debug(f"Try login with H2D; retrieve tokens via {request["method"]} {request["url"]}")
         result = await self._async_send_request(context, request)
 
-        access_token = result.get('access_token') or ""
-        refresh_token = result.get('refresh_token') or ""
-        access_expires_in = result.get('expires_in') or DABPUMPS_API_ACCESS_TOKEN_VALID
-        refresh_expires_in = result.get('refresh_expires_in') or DABPUMPS_API_REFRESH_TOKEN_VALID
+        access_token = result.get('access_token') or None
+        refresh_token = result.get('refresh_token') or None
+        access_expires_in = result.get('expires_in') or DABCS_ACCESS_TOKEN_VALID
+        refresh_expires_in = result.get('refresh_expires_in') or DABCS_REFRESH_TOKEN_VALID
 
         if not access_token:
             error = f"No tokens found in response from {request["url"]}"
             _LOGGER.debug(error)    # logged as warning after last retry
             raise DabPumpsApiAuthError(error)
+        
+        if refresh_token == "NOTIMPLEMENTEDYET":
+            refresh_token = None
+            refresh_expires_in = 0
 
         # if we reach this point then the token was OK
-        # Store returned access-token as cookie so it will automatically be passed in next calls
-        await self._client.async_set_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE, access_token)
+        # Store access-token as cookie so it will be passed in next calls to DCONNECT if needed
+        # Store access-token in variable so it will be added as Authorization header in calls to DABCS
+        #AJH await self._client.async_set_cookie(DCONNECT_API_DOMAIN, DCONNECT_ACCESS_TOKEN_COOKIE, access_token)
 
-        if access_token:
-            self._access_token = access_token
-            self._access_expiry = datetime.now() + timedelta(seconds = access_expires_in)
+        self._access_token = access_token
+        self._refresh_token = refresh_token
+        self._access_expiry = datetime.now() + timedelta(seconds = access_expires_in)
+        self._refresh_expiry = datetime.now() + timedelta(seconds = refresh_expires_in)
+        self._openid_client_id = openid_client_id
+        self._openid_client_secret = openid_client_secret
 
-        if refresh_token:
-            self._refresh_token = refresh_token
-            self._refresh_expiry = datetime.now() + timedelta(seconds = refresh_expires_in)
+        # Set other login parameters
+        self._login_time = time.time()
+        self._login_method = DabPumpsLogin.H2D_APP
+        self._fetch_method = DabPumpsFetch.DABCS
+        self._auth_method = DabPumpsAuth.HEADER
+        self._extra_headers = {}
 
         
     async def _async_login_dablive_app(self, isDabLive=1):
@@ -488,7 +528,7 @@ class DabPumpsApi:
         context = f"Login via DabLive App (isDabLive={isDabLive})"
         request = {
             "method": "POST",
-            "url": DABPUMPS_API_URL + f"/auth/token",
+            "url": DCONNECT_API_URL + f"/auth/token",
             "params": {
                 'isDabLive': isDabLive,     # required param, though actual value seems to be completely ignored
             },
@@ -505,26 +545,46 @@ class DabPumpsApi:
         result = await self._async_send_request(context, request)
 
         access_token = result.get('access_token') or ""
+        refresh_token = result.get('refresh_token') or ""
+        access_expires_in = result.get('expires_in') or DCONNECT_ACCESS_TOKEN_VALID
+        refresh_expires_in = result.get('refresh_expires_in') or DCONNECT_REFRESH_TOKEN_VALID
+
         if not access_token:
-            error = f"No access token found in response from {request["url"]}"
+            error = f"No tokens found in response from {request["url"]}"
             _LOGGER.debug(error)    # logged as warning after last retry
             raise DabPumpsApiAuthError(error)
+        
+        if refresh_token == "NOTIMPLEMENTEDYET":
+            refresh_token = None
+            refresh_expires_in = 0
 
         # if we reach this point then the token was OK
-        # Store returned access-token as cookie so it will automatically be passed in next calls
-        # No need to remember access-token, we never need to pass it as header with this login method
-        await self._client.async_set_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE, access_token)
+        # Store access-token as cookie so it will be passed in next calls to DCONNECT if needed
+        # Store access-token in variable so it will be added as Authorization header in calls to DABCS
+        #await self._client.async_set_cookie(DCONNECT_API_DOMAIN, DCONNECT_ACCESS_TOKEN_COOKIE, access_token)
 
-        self._access_token = None
-        self._access_expiry = datetime.min
-        self._refresh_token = None
-        self._refresh_expiry = datetime.min
+        self._access_token = access_token
+        self._refresh_token = refresh_token
+        self._access_expiry = datetime.now() + timedelta(seconds = access_expires_in)
+        self._refresh_expiry = datetime.now() + timedelta(seconds = refresh_expires_in)
+        self._openid_client_id = None
+        self._openid_client_secret = None
+
+        # Set other login parameters
+        self._login_time = time.time()
+        self._login_method = DabPumpsLogin.DABLIVE_APP_1 if isDabLive else DabPumpsLogin.DABLIVE_APP_0
+        self._fetch_method = DabPumpsFetch.DCONNECT
+        self._auth_method = DabPumpsAuth.HEADER
+        self._extra_headers = {}
 
         
     async def _async_login_dconnect_app(self):
         """Login to DAB Pumps via the method as used by the DConnect app"""
 
         # Step 1: get authorization token
+        openid_client_id = DCONNECT_APP_CLIENT_ID
+        openid_client_secret = DCONNECT_APP_CLIENT_SECRET
+
         context = f"login DConnect_app"
         request = {
             "method": "POST",
@@ -533,8 +593,8 @@ class DabPumpsApi:
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
             "data": {
-                'client_id': 'DWT-Dconnect-Mobile',
-                'client_secret': 'ce2713d8-4974-4e0c-a92e-8b942dffd561',
+                'client_id': openid_client_id,
+                'client_secret': openid_client_secret,
                 'scope': 'openid',
                 'grant_type': 'password',
                 'username': self._username, 
@@ -546,34 +606,37 @@ class DabPumpsApi:
         result = await self._async_send_request(context, request)
 
         access_token = result.get('access_token') or ""
+        refresh_token = result.get('refresh_token') or ""
+        access_expires_in = result.get('expires_in') or DCONNECT_ACCESS_TOKEN_VALID
+        refresh_expires_in = result.get('refresh_expires_in') or DCONNECT_REFRESH_TOKEN_VALID
+
         if not access_token:
-            error = f"No access token found in response from {request["url"]}"
+            error = f"No tokens found in response from {request["url"]}"
             _LOGGER.debug(error)    # logged as warning after last retry
             raise DabPumpsApiAuthError(error)
-
-        # Step 2: Validate the auth token against the DABPumps Api
-        context = f"Login via DConnect App; validate token"
-        request = {
-            "method": "GET",
-            "url": DABPUMPS_API_URL + f"/api/v1/token/validatetoken",
-            "params": { 
-                'email': self._username,
-                'token': access_token,
-            },
-        }
-
-        _LOGGER.debug(f"Try login with DConnect (app); validate token via {request["method"]} {request["url"]}")
-        result = await self._async_send_request(context, request)
+        
+        if refresh_token == "NOTIMPLEMENTEDYET":
+            refresh_token = None
+            refresh_expires_in = 0
 
         # if we reach this point then the token was OK
-        # Store returned access-token as cookie so it will automatically be passed in next calls
-        # No need to remember access-token, we never need to pass it as header with this login method
-        await self._client.async_set_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE, access_token)
+        # Store access-token as cookie so it will be passed in next calls to DCONNECT if needed
+        # Store access-token in variable so it will be added as Authorization header in calls to DABCS
+        #await self._client.async_set_cookie(DCONNECT_API_DOMAIN, DCONNECT_ACCESS_TOKEN_COOKIE, access_token)
 
-        self._access_token = None
-        self._access_expiry = datetime.min
-        self._refresh_token = None
-        self._refresh_expiry = datetime.min
+        self._access_token = access_token
+        self._refresh_token = refresh_token
+        self._access_expiry = datetime.now() + timedelta(seconds = access_expires_in)
+        self._refresh_expiry = datetime.now() + timedelta(seconds = refresh_expires_in)
+        self._openid_client_id = openid_client_id
+        self._openid_client_secret = openid_client_secret
+
+        # Set other login parameters
+        self._login_time = time.time()
+        self._login_method = DabPumpsLogin.DCONNECT_APP
+        self._fetch_method = DabPumpsFetch.DCONNECT
+        self._auth_method = DabPumpsAuth.HEADER
+        self._extra_headers = { "User-Agent": DCONNECT_APP_USER_AGENT }
 
 
     async def _async_login_dconnect_web(self):
@@ -583,7 +646,7 @@ class DabPumpsApi:
         context = f"login DConnect_web home"
         request = {
             "method": "GET",
-            "url": DABPUMPS_API_URL,
+            "url": DCONNECT_API_URL,
             "flags": {
                 "redirects": True,
             }
@@ -616,7 +679,7 @@ class DabPumpsApi:
         await self._async_send_request(context, request)
 
         # Verify the client access_token cookie has been set
-        access_token = await self._client.async_get_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE)
+        access_token = await self._client.async_get_cookie(DCONNECT_API_DOMAIN, DCONNECT_ACCESS_TOKEN_COOKIE)
         if not access_token:
             error = f"No access token found in response from {request["url"]}"
             _LOGGER.debug(error)    # logged as warning after last retry
@@ -625,12 +688,19 @@ class DabPumpsApi:
         # if we reach this point without exceptions then login was successfull
         # Cookie for access_token is already set by the last call
         # No need to remember access-token, we never need to pass it as header with this login method
-        await self._client.async_set_cookie(DABPUMPS_API_DOMAIN, DABPUMPS_API_ACCESS_TOKEN_COOKIE, access_token)
-
         self._access_token = None
         self._access_expiry = datetime.min
         self._refresh_token = None
         self._refresh_expiry = datetime.min
+        self._openid_client_id = None
+        self._openid_client_secret = None
+
+        # Set other login parameters
+        self._login_time = time.time()
+        self._login_method = DabPumpsLogin.DCONNECT_WEB
+        self._fetch_method = DabPumpsFetch.DCONNECT
+        self._auth_method = DabPumpsAuth.COOKIE
+        self._extra_headers = {}
 
         
     async def async_logout(self):
@@ -662,6 +732,8 @@ class DabPumpsApi:
         if not context.startswith("login") or method not in [DabPumpsLogin.ACCESS_TOKEN]:
             self._refresh_token = None
             self._refresh_expiry = datetime.min
+            self._openid_client_id = None
+            self._openid_client_secret = None
 
         # Do not clear login_method when called in a 'login' context, as it interferes with 
         # the loop iterating all login methods.
@@ -670,78 +742,54 @@ class DabPumpsApi:
             self._login_time = 0
         
 
-    async def _async_fetch_initialconfig(self, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
-        """Get inital config"""
-
-        # Retrieve data via REST request
-        if raw is None:
-            context = f"installations {self._username.lower()}"
-            request = {
-                "method": "GET",
-                "url": DABCS_INIT_URL,
-                "headers": {
-                    'x-dabcs-auth': 'vwLbTh3HKJdjHRHzdEHen43PyffAc9gK',     #AJH TODO figure out how to generate
-                    'x-dabcs-device': '931c05e971942b9b',                   #AJH TODO figure out how to generate
-                },
-            }
-
-            _LOGGER.debug(f"Retrieve initial config via {request["method"]} {request["url"]}")
-            raw = await self._async_send_request(context, request)  
-
-        # Process the resulting raw data
-        client_id = raw.get('client_id', DABPUMPS_DEFAULT_CLIENT_ID)
-        translation_url = raw.get('translations_url', DABPUMPS_DEFAULT_TRANSLATIONS_URL)
-        url_map = raw.get('oid_config', {})
-
-        # Sanity check. # Never overwrite a known install_map with empty lists
-        if len(url_map)==0:
-            raise DabPumpsApiDataError(f"No oid_config found in data")
-
-        # Remember this data
-        url_map['translations_url'] = translation_url
-        self._init_url_map_ts = datetime.now()
-        self._init_url_map = url_map
-        self._init_client_id = client_id
-
-        # Return data or raw or both
-        match ret:
-            case DabPumpsRet.DATA: return self._init_url_map
-            case DabPumpsRet.RAW: return raw
-            case DabPumpsRet.BOTH: return (self._init_url_map, raw)
-
-
     async def async_fetch_install_list(self, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
         """Get installation list"""
 
         # Retrieve data via REST request
         if raw is None:
+            match self._fetch_method:
+                case DabPumpsFetch.DABCS:    url = DABCS_API_URL + '/mobile/v1/installations'
+                case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + '/api/v1/installation' # or DABPUMPS_API_URL + '/getInstallationList'
+
             context = f"installations {self._username.lower()}"
             request = {
                 "method": "GET",
-                #"url": DABPUMPS_API_URL + '/getInstallationList',
-                "url": DABPUMPS_API_URL + '/api/v1/installation',
+                "url": url,
             }
 
             _LOGGER.debug(f"Retrieve installation list for '{self._username}' via {request["method"]} {request["url"]}")
             raw = await self._async_send_request(context, request)  
 
         # Process the resulting raw data
+        # For DabCS:
+        # {
+        #   "installations": [
+        #     { "name": "some_str", "installation_id": "some_guid", "metadata": { ... }, "current_user_role": "role", ... }
+        #   ]
+        # }
+        # For DConnect:
+        # {
+        #   "values": [     # or "rows": [
+        #     { "name": "some_str", "installation_id": "some_guid", "user_role": "role", ... }
+        #   ]
+        # }
         install_map = {}
-        installations = raw.get('values', None) or raw.get('rows', None) or []
+        installations = raw.get('installations', None) or raw.get('values', None) or raw.get('rows', None) or []
         
         for install_idx, installation in enumerate(installations):
             
             install_id = installation.get('installation_id', '')
             install_name = installation.get('name', None) or installation.get('description', None) or f"installation {install_idx}"
+            install_meta = installation.get('metadata', {})
 
             _LOGGER.debug(f"Installation found: {install_name}")
             install = DabPumpsInstall(
                 id = install_id,
                 name = install_name,
                 description = installation.get('description', None) or '',
-                company = installation.get('company', None) or '',
-                address = installation.get('address', None) or '',
-                role = installation.get('user_role', None) or 'CUSTOMER',
+                company = installation.get('company', None) or install_meta.get('company', None) or '',
+                address = installation.get('address', None) or install_meta.get('address', None) or '',
+                role = installation.get('current_user_role', None) or installation.get('user_role', None) or 'CUSTOMER',
                 devices = len(installation.get('dums', None) or []),
             )
             install_map[install_id] = install
@@ -768,7 +816,7 @@ class DabPumpsApi:
         """
 
         # Retrieve list of devices within this install
-        await self.async_fetch_install_details(install_id)
+        await self.async_fetch_install_devices(install_id)
 
         for device in self._device_map.values():
                 # First retrieve device config
@@ -779,33 +827,50 @@ class DabPumpsApi:
 
 
     async def async_fetch_install_details(self, install_id: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
+        warnings.warn("Function async_fetch_install_details() is deprecated. Use async_fetch_install_devices() instead.", DeprecationWarning, stacklevel=2)
+        await self.async_fetch_install_devices(install_id, raw, ret)
+
+
+    async def async_fetch_install_devices(self, install_id: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
         """Get installation details"""
 
         # Retrieve data via REST request
         if raw is None:
+            match self._fetch_method:
+                case DabPumpsFetch.DABCS:    url = DABCS_API_URL + f"/mobile/v1/installations/{install_id}/dums"
+                case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + f"/api/v1/installation/{install_id}" # or DABPUMPS_API_URL + f"/getInstallation/{install_id}"
+
             context = f"installation {install_id}"
             request = {
                 "method": "GET",
-                #"url": DABPUMPS_API_URL + f"/getInstallation/{install_id}",
-                "url": DABPUMPS_API_URL + f"/api/v1/installation/{install_id}",
+                "url": url,
             }
             
             _LOGGER.debug(f"Retrieve installation details via {request["method"]} {request["url"]}")
             raw = await self._async_send_request(context, request)
 
         # Process the resulting raw data
-        installation_id = raw.get('installation_id', '')
-        if installation_id != install_id: 
-            raise DabPumpsApiDataError(f"Expected installation id {install_id} was not found in returned installation details")
-
+        # For DabCS:
+        # {
+        #   "dums": [
+        #     { "configuration_id": "guid3", "serial": "some_str", "status": { ... }, ... }
+        #   ]
+        # }
+        # For DConnect:
+        # {
+        #   "installation_id": "guid1",
+        #   "dums": [
+        #     { "configuration_id": "guid3", "serial": "some_str", "status": { ... }, ... }
+        #   ]
+        # }
         device_map = {}
         ins_dums = raw.get('dums', [])
 
         for dum_idx, dum in enumerate(ins_dums):
             dum_serial = dum.get('serial', None) or ''
             dum_name = dum.get('name', None) or dum.get('ProductName', None) or f"device {dum_idx}"
-            dum_product = dum.get('ProductName', None) or f"device {dum_idx}"
-            dum_version = dum.get('configuration_name', None) or ''
+            dum_product = dum.get('ProductName', None) or dum.get('distro_embedded', None) or f"device {dum_idx}"
+            dum_version = dum.get('configuration_name', None) or dum.get('distro_embedded', None) or ''
             dum_config = dum.get('configuration_id', None) or ''
 
             if not dum_serial: 
@@ -830,9 +895,6 @@ class DabPumpsApi:
             
             _LOGGER.debug(f"Device found: {dum_name} with serial {dum_serial}")
             
-        # Also detect the user role within this installation
-        user_role = raw.get('user_role', 'CUSTOMER')
-
         # Sanity check. # Never overwrite a known device_map
         if len(device_map) == 0:
             raise DabPumpsApiDataError(f"No devices found for installation id {install_id}")
@@ -846,16 +908,18 @@ class DabPumpsApi:
         for key in candidate_list:
             self._device_map.pop(key, None)
 
-        # Remember user role. This is only usefull when there is only one installation.
-        # Also, we override the user role as detected when retrieving the installation list
+        # For DConnect: we override the user role as detected when retrieving the installation list
         # as the value there sometimes seems incorrect
-        self._user_role_ts = datetime.now()
-        self._user_role = user_role
+        user_role_new = raw.get('user_role', None)
+        user_role_old = self._install_map[install_id].role if install_id in self._install_map else None
 
-        if install_id in self._install_map and self._install_map[install_id].role != user_role:
-            _LOGGER.debug(f"Override install role from '{self._install_map[install_id].role}' to '{user_role}' for installation id '{install_id}'")
+        if user_role_new and \
+           user_role_old and \
+           user_role_new != user_role_old:
+        
+            _LOGGER.debug(f"Override install role from '{user_role_old}' to '{user_role_new}' for installation id '{install_id}'")
             install_dict = self._install_map[install_id]._asdict()
-            install_dict["role"] = user_role
+            install_dict["role"] = user_role_new
             self._install_map[install_id] = DabPumpsInstall(**install_dict)
 
         # Return data or raw or both
@@ -913,22 +977,29 @@ class DabPumpsApi:
 
         # Retrieve data via REST request
         if raw is None:
+            match self._fetch_method:
+                case DabPumpsFetch.DABCS:    url = DCONNECT_API_URL + f"/api/v1/configuration/{config_id}"  # No specific method for DABCS identified yet
+                case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + f"/api/v1/configuration/{config_id}"
+
             context = f"configuration {config_id}"
             request = {
                 "method": "GET",
-                "url":  DABPUMPS_API_URL + f"/api/v1/configuration/{config_id}",
-                # or    DABPUMPS_API_URL + f"/api/v1/configure/paramsDefinition?version=0&doc={config_name}",
+                "url":  url,
             }
             
             _LOGGER.debug(f"Retrieve device config for '{config_id}' via {request["method"]} {request["url"]}")
             raw = await self._async_send_request(context, request)
 
         # Process the resulting raw data
+        # For DConnect (and DABCS):
+        # {
+        #    "configuration_id": "id", "name": "some_name", "label": "some_str", "description": "some_str", "metadata": { ... }, ... }
+        # }
         config_map = {}
 
         conf_id = raw.get('configuration_id', '')
-        conf_name = raw.get('name') or f"config{conf_id}"
-        conf_label = raw.get('label') or f"config{conf_id}"
+        conf_name = raw.get('name') or f"config {conf_id}"
+        conf_label = raw.get('label') or f"config {conf_id}"
         conf_descr = raw.get('description') or f"config {conf_id}"
         conf_params = {}
 
@@ -1064,24 +1135,67 @@ class DabPumpsApi:
     async def _async_fetch_device_statusses(self, serial: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
         """Fetch the statusses for a DAB Pumps device"""
     
+        device = self._device_map.get(serial, None)
+        if not device:
+            return
+        
+        install_id = device.install_id
+
         # Retrieve data via REST request
         if raw is None:
+            match self._fetch_method:
+                case DabPumpsFetch.DABCS:    url = DABCS_API_URL + f"/mobile/v1/installations/{install_id}/dums"
+                case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + f"/dumstate/{serial}" # or f"/api/v1/dum/{serial}/state"
+
             context = f"statusses {serial}"
             request = {
                 "method": "GET",
-                "url": DABPUMPS_API_URL + f"/dumstate/{serial}",
-                # or   DABPUMPS_API_URL + f"/api/v1/dum/{serial}/state",
+                "url": url,
             }
             
             _LOGGER.debug(f"Retrieve device statusses for '{serial}' via {request["method"]} {request["url"]}")
             raw = await self._async_send_request(context, request)
         
         # Process the resulting raw data
-        status_map = {}
-        status = raw.get('status') or "{}"
-        values = json.loads(status)
+        # For DabCS: (we retrieve way too much information, but have not identified a more precise method yet)
+        # {
+        #   "dums": [
+        #     { 
+        #       "serial": "some_str", 
+        #       "statusts": "some_datetime", 
+        #       "status": { 
+        #          "key1": "value1", "key2": "value2", ... 
+        #       },
+        #       ...
+        #     },
+        #     ...
+        #   ]
+        # }
+        # For DConnect:
+        # {
+        #   "statusts": "some_datetime",
+        #   "status": {
+        #     "key1": "value1", "key2": "value2", ...
+        #   },
+        #   ...
+        # }
 
-        statusts = raw.get('statusts') or ""
+        status_map = {}
+        statusts = ""
+        values = {}
+        if "dums" in raw:
+            for dum in raw.get('dums', []):
+                dum_serial = dum.get('serial') or ''
+
+                if dum_serial == serial:
+                    statusts = dum.get('statusts') or ""
+                    values = dum.get('status') or {}
+                    break
+        else:
+            statusts = raw.get('statusts') or ""
+            status = raw.get('status') or "{}" # string!
+            values = json.loads(status)
+
         status_ts = datetime.fromisoformat(statusts) if statusts else datetime.now(timezone.utc)
 
         for item_key, item_code in values.items():
@@ -1198,7 +1312,7 @@ class DabPumpsApi:
         context = f"set {status.serial}:{status.key}"
         request = {
             "method": "POST",
-            "url": DABPUMPS_API_URL + f"/dum/{status.serial}",
+            "url": DCONNECT_API_URL + f"/dum/{status.serial}",
             "headers": {
                 'Content-Type': 'application/json',
             },
@@ -1220,16 +1334,29 @@ class DabPumpsApi:
     
         # Retrieve data via REST request
         if raw is None:
+            match self._fetch_method:
+                # No specific method for DABCS identified yet
+                case DabPumpsFetch.DABCS:    url = DCONNECT_API_URL + f"/resources/js/localization_{lang}.properties?format=JSON&fullmerge=1"  
+                case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + f"/resources/js/localization_{lang}.properties?format=JSON&fullmerge=1"
+
             context = f"localization_{lang}"
             request = {
                 "method": "GET",
-                "url": DABPUMPS_API_URL + f"/resources/js/localization_{lang}.properties?format=JSON",
+                "url": url,
             }
             
             _LOGGER.debug(f"Retrieve language info via {request["method"]} {request["url"]}")
             raw = await self._async_send_request(context, request)
 
         # Process the resulting raw data
+        # For DConnect:
+        # {
+        #   "bundle": "2 letter language code",
+        #   "messages": {
+        #     "key1": "value1", "key2": "value2", ...
+        #   },
+        #   ...
+        # }
         language = raw.get('bundle', '')
         messages = raw.get('messages', {})
         string_map = { k: v for k, v in messages.items() }
@@ -1381,9 +1508,16 @@ class DabPumpsApi:
         if not "headers" in request:
             request["headers"] = {}
 
-        request["headers"]['User-Agent'] = 'python-requests/2.20.0'
-        request["headers"]['Cache-Control'] = 'no-store, no-cache, max-age=0'
-        request["headers"]['Connection'] = 'close'
+        if self._auth_method == DabPumpsAuth.HEADER and not context.startswith('login'):
+            request["headers"]['Authorization'] = 'Bearer ' + self._access_token
+
+        if self._extra_headers:
+            request["headers"].update(self._extra_headers)
+
+        # Add some default headers if not already set via extra_headers
+        request["headers"].setdefault('User-Agent', 'python-requests/2.20.0')
+        request["headers"].setdefault('Cache-Control', 'no-store, no-cache, max-age=0')
+        request["headers"].setdefault('Connection', 'close')
 
         # Perform the request
         try:

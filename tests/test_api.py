@@ -139,7 +139,7 @@ async def test_login_seq(name, usr, pwd, exp_except, request):
     assert context.api is None
 
     # First call with wrong pwd
-    context.api = DabPumpsApi(usr, pwd+"xxx")
+    context.api = DabPumpsApi(usr, "wrong_pwd")
     assert context.api.closed == False
     assert context.api.login_method is None
 
@@ -251,19 +251,32 @@ async def test_login(name, method, usr, pwd, exp_except, request):
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("context")
 @pytest.mark.parametrize(
-    "name, loop, exp_except",
+    "name, method, loop, exp_except",
     [
-        ("data ok", 0, None),
-        # ("data loop", 24*60, None),    # Run 1 full day
+        ("ok",   'Any',           0, None),
+        ("ok",   'H2D_app',       0, None),
+        ("ok",   'DabLive_app_0', 0, None),
+        ("ok",   'DabLive_app_1', 0, None),
+        ("ok",   'DConnect_app',  0, None),
+        ("ok",   'DConnect_web',  0, None),
+        # ("loop", "Any", 24*60, None),    # Run 1 full day
     ]
 )
-async def test_get_data(name, loop, exp_except, request):
+async def test_get_data(name, method, loop, exp_except, request):
     context = request.getfixturevalue("context")
     context.api = DabPumpsApi(TEST_USERNAME, TEST_PASSWORD)
     assert context.api.closed == False
 
     # Login
-    await context.api.async_login()
+    match method:
+        case 'Any':             await context.api.async_login()
+        case 'H2D_app':         await context.api._async_login_h2d_app()
+        case 'DabLive_app_0':   await context.api._async_login_dablive_app(isDabLive=0)
+        case 'DabLive_app_1':   await context.api._async_login_dablive_app(isDabLive=1)
+        case 'DConnect_app':    await context.api._async_login_dconnect_app()
+        case 'DConnect_web':    await context.api._async_login_dconnect_web()
+
+    login_method_org = context.api.login_method
 
     # Get install list
     await context.api.async_fetch_install_list()
@@ -320,8 +333,9 @@ async def test_get_data(name, loop, exp_except, request):
     for idx in range(1,loop+1):
         # Get device statusses
         try:
-            # Check cookie and re-login if needed
+            # Check access-token and refresh or re-login if needed
             await context.api.async_login()
+            assert login_method_org == context.api.login_method
 
             for device_serial,device in context.api.device_map.items():
                 await context.api.async_fetch_device_statusses(device_serial)
