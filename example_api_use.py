@@ -54,10 +54,11 @@ async def main():
             logger.info(f"installation: {install.name} ({install.id})")
 
             # Retrieve installation details
-            # This includes the list of devices and configuration meta data for each device
-            await api.async_fetch_install(install_id)
+            # This includes the list of devices, configuration meta data for each device
+            # and initial statuses for each device
+            await api.async_fetch_install_details(install_id)
 
-            logger.info(f"devices: {len(api.device_map)}")
+        logger.info(f"devices: {len(api.device_map)}")
 
         for device in api.device_map.values():
             # Log the retrieved info
@@ -78,15 +79,15 @@ async def main():
             # Regularly repeat the login call to make sure the access-token is renewed when needed.
             await api.async_login()
 
+            # Retrieve fresh statuses for all devices in this install
+            await api.async_fetch_install_statuses(install_id)
+
             for device in api.device_map.values():
-                # Retrieve device statusses
-                await api.async_fetch_device_statusses(device.serial)
-
-                device_statusses = { k:v for k,v in api.status_map.items() if v.serial==device.serial }
+                device_statuses = { k:v for k,v in api.status_map.items() if v.serial==device.serial }
                 logger.info("")
-                logger.info(f"statusses: {len(device_statusses)}")
+                logger.info(f"statuses for {device.name}: {len(device_statuses)}")
 
-                for k,v in device_statusses.items():
+                for k,v in device_statuses.items():
                     value_with_unit = f"{v.value} {v.unit}" if v.unit is not None else v.value
 
                     if (v.value != v.code):
@@ -96,7 +97,7 @@ async def main():
                         # Display real-life value, original encoded value is the same
                         logger.info(f"    {v.name}: {value_with_unit}")
 
-            # Wait one minute and retrieve device statusses again
+            # Wait one minute and retrieve install statuses again
             logger.info(f"wait")
             await asyncio.sleep(60)
 

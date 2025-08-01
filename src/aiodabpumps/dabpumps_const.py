@@ -19,6 +19,7 @@ DCONNECT_API_URL = "https://dconnect.dabpumps.com"
 DCONNECT_API_DOMAIN = "dconnect.dabpumps.com"
 DCONNECT_ACCESS_TOKEN_COOKIE = "dabcsauthtoken"
 DCONNECT_ACCESS_TOKEN_VALID = 5*60  # 5 minutes in seconds
+DCONNECT_REFRESH_TOKEN_COOKIE = "dabcsauthtoken"
 DCONNECT_REFRESH_TOKEN_VALID = 30*60 # 30 minutes in seconds
 
 H2D_APP_REDIRECT_URI = 'dabiopapp://Welcome'
@@ -32,13 +33,13 @@ DCONNECT_APP_USER_AGENT = 'Dalvik/2.1.0 (Linux; U; Android 9; SM-G935F Build/PI)
 # Period to prevent status updates when value was recently updated
 STATUS_UPDATE_HOLD = 30 # seconds
 
-# Extra device attributes that are not in install info, but retrieved from statusses
+# Extra device attributes that are not in install info, but retrieved from statuses
 DEVICE_ATTR_EXTRA = {
     "mac_address": ['MacWlan'],
     "sw_version": ['LvFwVersion', 'ucVersion']
 }
 
-# Known device statusses that normally don't hold a value until an action occurs
+# Known device statuses that normally don't hold a value until an action occurs
 DEVICE_STATUS_STATIC = {
     "PowerShowerCountdown",
     "SleepModeCountdown",

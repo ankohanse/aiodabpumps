@@ -3,6 +3,7 @@
 import base64
 import copy
 import hashlib
+import jwt
 import math
 import os
 import warnings
@@ -10,7 +11,6 @@ import aiohttp
 import asyncio
 import httpx
 import json
-import jwt
 import logging
 import re
 import time
@@ -29,6 +29,7 @@ from .dabpumps_const import (
     DCONNECT_API_DOMAIN,
     DCONNECT_ACCESS_TOKEN_COOKIE,
     DCONNECT_ACCESS_TOKEN_VALID,
+    DCONNECT_REFRESH_TOKEN_COOKIE,
     DCONNECT_REFRESH_TOKEN_VALID,
     DABCS_INIT_URL,
     DABCS_API_URL,
@@ -75,12 +76,6 @@ class DabPumpsFetch(StrEnum):
 class DabPumpsAuth(StrEnum):
     HEADER = "Authorization Header"
     COOKIE = "Cookie"
-
-class DabPumpsRet(Enum):
-    NONE = 0
-    DATA = 1
-    RAW = 2
-    BOTH = 3
 
 
 # DabPumpsAPI to detect device and get device info, fetch the actual data from the device, and parse it
@@ -303,23 +298,31 @@ class DabPumpsApi:
         context = f"login access_token reuse"
 
         if self._auth_method == DabPumpsAuth.COOKIE:
-            # No need to check access_token; the cookie is automatically refreshed during periodic calls
-            return
+            # Check that we still have the access token cookie
+            access_token = await self._client.async_get_cookie(DCONNECT_API_DOMAIN, DCONNECT_ACCESS_TOKEN_COOKIE)
+            if access_token:
+                # No need to check access_token; the cookie is automatically refreshed during periodic calls
+                # And in case of an unexpected authentication error, it is cleared
+                return
+            else:
+                error = f"Access token not found"      
+                _LOGGER.debug(error)
+                raise DabPumpsApiAuthError(error)
 
         # Continue below for DabPumpsAuth.HEADER
 
         if self._refresh_token:
             # Never check access token of we have a refresh token, 
-            # instead continue to the next login method (token refresh)
-            raise DabPumpsApiAuthError(f"force refresh of access-token" )
+            # instead silently continue to the next login method (token refresh)
+            raise DabPumpsApiAuthError(f"force refresh of access-token")
 
         if not self._access_token:
             error = f"Access token not found"      
             _LOGGER.debug(error)
             raise DabPumpsApiAuthError(error)
             
-        old_access_token_payload = jwt.decode(jwt=self._access_token, options={"verify_signature": False})
-        epoch_exp = old_access_token_payload.get("exp", 0)
+        token_payload = jwt.decode(jwt=self._access_token, options={"verify_signature": False})
+        epoch_exp = token_payload.get("exp", 0)
         epoch_now = time.time()
 
         # The DAB Pumps server UTC time is observed to be out by an hour (either before or behind), 
@@ -329,7 +332,7 @@ class DabPumpsApi:
             _LOGGER.debug(error)    # logged as warning after last retry
             raise DabPumpsApiAuthError(error)
 
-        await self._async_update_diagnostics(datetime.now(), context, None, None, old_access_token_payload)
+        await self._async_update_diagnostics(datetime.now(), context, None, None, token_payload)
 
 
     async def _async_login_refresh_token(self):
@@ -338,15 +341,21 @@ class DabPumpsApi:
         context = f"login access_token refresh"
 
         if self._auth_method == DabPumpsAuth.COOKIE:
-            # No need to check refresh_token; the cookie is automatically updated during periodic calls
-            return
+            # Check that we still have the refresh token cookie
+            refresh_token = await self._client.async_get_cookie(DCONNECT_API_DOMAIN, DCONNECT_REFRESH_TOKEN_COOKIE)
+            if refresh_token:
+                # No need to check access_token; the cookie is automatically updated during periodic calls
+                # And in case of an unexpected authentication error, it is cleared
+                return
+            else:
+                error = f"Refresh token not found"      
+                _LOGGER.debug(error)
+                raise DabPumpsApiAuthError(error)
 
         if not self._refresh_token:
             error = f"Refresh token not found"      
             _LOGGER.debug(error)
             raise DabPumpsApiAuthError(error)
-
-        old_refresh_token_payload = jwt.decode(jwt=self._refresh_token, options={"verify_signature": False})
 
         # Don't bother to check the contents of the refresh token, 
         # just attempt to request a new access token via the refresh token
@@ -361,12 +370,12 @@ class DabPumpsApi:
                 'grant_type': 'refresh_token',
                 'refresh_token': self._refresh_token, 
                 'client_id': self._openid_client_id,
-                'client_secret': self._openid_client_secret or ""
+                'client_secret': self._openid_client_secret or "",
             },
         }
         
         _LOGGER.debug(f"Try login with refresh token; authenticate via {request["method"]} {request["url"]}")
-        result = await self._async_send_request(context, request, redirect=False)
+        result = await self._async_send_request(context, request)
 
         access_token = result.get('access_token') or ""
         refresh_token = result.get('refresh_token') or ""
@@ -391,7 +400,8 @@ class DabPumpsApi:
         self._access_expiry = datetime.now() + timedelta(seconds=access_expires_in)
         self._refresh_expiry = datetime.now() + timedelta(seconds=refresh_expires_in)
 
-        await self._async_update_diagnostics(datetime.now(), context, None, None, old_refresh_token_payload)
+        token_payload = jwt.decode(jwt=access_token, options={"verify_signature": False})
+        await self._async_update_diagnostics(datetime.now(), context, None, None, token_payload)
 
 
     async def _async_login_h2d_app(self):
@@ -717,13 +727,14 @@ class DabPumpsApi:
         # It will result in a deadlock as async_login calls _async_logout from within its lock
 
         # Reduce amount of tracing to only when we are actually logged-in.
-        if self._login_time:
+        if self._login_time and method not in [DabPumpsLogin.ACCESS_TOKEN]:
             _LOGGER.debug(f"Logout")
 
         # Home Assistant will issue a warning when calling aclose() on the async aiohttp client.
         # Instead of closing we will simply forget all cookies. The result is that on a next
         # request, the client will act like it is a new one.
         await self._client.async_clear_cookies()
+
         self._access_token = None
         self._access_expiry = datetime.min
 
@@ -742,23 +753,26 @@ class DabPumpsApi:
             self._login_time = 0
         
 
-    async def async_fetch_install_list(self, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
-        """Get installation list"""
+    async def async_fetch_install_list(self):
+        """
+        Get installation list
+        This fills:
+          install_map    (details for each install)
+        """
 
         # Retrieve data via REST request
-        if raw is None:
-            match self._fetch_method:
-                case DabPumpsFetch.DABCS:    url = DABCS_API_URL + '/mobile/v1/installations'
-                case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + '/api/v1/installation' # or DABPUMPS_API_URL + '/getInstallationList'
+        match self._fetch_method:
+            case DabPumpsFetch.DABCS:    url = DABCS_API_URL + '/mobile/v1/installations'
+            case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + '/api/v1/installation' # or DABPUMPS_API_URL + '/getInstallationList'
 
-            context = f"installations {self._username.lower()}"
-            request = {
-                "method": "GET",
-                "url": url,
-            }
+        context = f"installations {self._username.lower()}"
+        request = {
+            "method": "GET",
+            "url": url,
+        }
 
-            _LOGGER.debug(f"Retrieve installation list for '{self._username}' via {request["method"]} {request["url"]}")
-            raw = await self._async_send_request(context, request)  
+        _LOGGER.debug(f"Retrieve installation list for '{self._username}' via {request["method"]} {request["url"]}")
+        raw = await self._async_send_request(context, request)  
 
         # Process the resulting raw data
         # For DabCS:
@@ -802,52 +816,73 @@ class DabPumpsApi:
         self._install_map_ts = datetime.now()
         self._install_map = install_map
 
-        # Return data or raw or both
-        match ret:
-            case DabPumpsRet.DATA: return install_map
-            case DabPumpsRet.RAW: return raw
-            case DabPumpsRet.BOTH: return (install_map, raw)
 
-
-    async def async_fetch_install(self, install_id: str):
+    async def async_fetch_install_details(self, install_id: str):
         """
         Fetch all details from an installation.
-        Includes list of devices, and config meta data for each device
+        This fills:
+          device_map    (details for each device)
+          config_map    (config metadata for each device)
+          status_map    (inital statuses for each device)
         """
 
         # Retrieve list of devices within this install
-        await self.async_fetch_install_devices(install_id)
+        raw = await self._async_fetch_install_devices(install_id)
 
-        for device in self._device_map.values():
-                # First retrieve device config
-                await self.async_fetch_device_config(device.config_id)
+        # First retrieve all device configs
+        for config_id in [ d.config_id for d in self._device_map.values() if d.install_id==install_id ]:
+            await self._async_fetch_device_config(config_id)
 
-                # Then retrieve device details
-                await self.async_fetch_device_details(device.serial)
+        # Next, generate static statuses from the device configs
+        # and retrieve inital device statuses
+        for serial in [ d.serial for d in self._device_map.values() if d.install_id==install_id ]:
+            await self._async_fetch_static_statuses(serial)
+            await self._async_fetch_device_statuses(serial, raw_install_data=raw)
+
+            # Finally, derive extra device details
+            await self._async_derive_device_details(serial)
 
 
-    async def async_fetch_install_details(self, install_id: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
-        warnings.warn("Function async_fetch_install_details() is deprecated. Use async_fetch_install_devices() instead.", DeprecationWarning, stacklevel=2)
-        await self.async_fetch_install_devices(install_id, raw, ret)
+    async def async_fetch_install_statuses(self, install_id: str):
+        """
+        Fetch the statuses for all devices in an installation
+        This updates:
+          status_map    (current statuses for each device)
+        """
 
+        match self._fetch_method:
+            case DabPumpsFetch.DABCS:
+                # Returns statuses for all devices in one call
+                context = f"installation {install_id}"
+                request = { "method": "GET", "url": DABCS_API_URL + f"/mobile/v1/installations/{install_id}/dums" }
+        
+                _LOGGER.debug(f"Retrieve installation statuses via {request["method"]} {request["url"]}")
+                raw = await self._async_send_request(context, request)
 
-    async def async_fetch_install_devices(self, install_id: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
+            case DabPumpsFetch.DCONNECT:
+                # Needs to retrieve data per device
+                url = None
+
+        for serial in [ d.serial for d in self._device_map.values() if d.install_id==install_id ]:
+            await self._async_fetch_device_statuses(serial, raw_install_data=raw)
+        
+        
+    async def _async_fetch_install_devices(self, install_id: str):
         """Get installation details"""
 
         # Retrieve data via REST request
-        if raw is None:
-            match self._fetch_method:
-                case DabPumpsFetch.DABCS:    url = DABCS_API_URL + f"/mobile/v1/installations/{install_id}/dums"
-                case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + f"/api/v1/installation/{install_id}" # or DABPUMPS_API_URL + f"/getInstallation/{install_id}"
+        match self._fetch_method:
+            case DabPumpsFetch.DABCS:    url = DABCS_API_URL + f"/mobile/v1/installations/{install_id}/dums"
+            case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + f"/api/v1/installation/{install_id}" # or DABPUMPS_API_URL + f"/getInstallation/{install_id}"
 
-            context = f"installation {install_id}"
-            request = {
-                "method": "GET",
-                "url": url,
-            }
-            
-            _LOGGER.debug(f"Retrieve installation details via {request["method"]} {request["url"]}")
-            raw = await self._async_send_request(context, request)
+        context = f"installation {install_id}"
+        request = {
+            "method": "GET",
+            "url": url,
+        }
+        
+        _LOGGER.debug(f"Retrieve installation details via {request["method"]} {request["url"]}")
+        raw = await self._async_send_request(context, request)
 
         # Process the resulting raw data
         # For DabCS:
@@ -860,7 +895,7 @@ class DabPumpsApi:
         # {
         #   "installation_id": "guid1",
         #   "dums": [
-        #     { "configuration_id": "guid3", "serial": "some_str", "status": { ... }, ... }
+        #     { "configuration_id": "guid3", "serial": "some_str", ... }
         #   ]
         # }
         device_map = {}
@@ -910,85 +945,38 @@ class DabPumpsApi:
 
         # For DConnect: we override the user role as detected when retrieving the installation list
         # as the value there sometimes seems incorrect
-        user_role_new = raw.get('user_role', None)
-        user_role_old = self._install_map[install_id].role if install_id in self._install_map else None
+        # user_role_new = raw.get('user_role', None)
+        # user_role_old = self._install_map[install_id].role if install_id in self._install_map else None
 
-        if user_role_new and \
-           user_role_old and \
-           user_role_new != user_role_old:
+        # if user_role_new and \
+        #    user_role_old and \
+        #    user_role_new != user_role_old:
         
-            _LOGGER.debug(f"Override install role from '{user_role_old}' to '{user_role_new}' for installation id '{install_id}'")
-            install_dict = self._install_map[install_id]._asdict()
-            install_dict["role"] = user_role_new
-            self._install_map[install_id] = DabPumpsInstall(**install_dict)
+        #     _LOGGER.debug(f"Override install role from '{user_role_old}' to '{user_role_new}' for installation id '{install_id}'")
+        #     install_dict = self._install_map[install_id]._asdict()
+        #     install_dict["role"] = user_role_new
+        #     self._install_map[install_id] = DabPumpsInstall(**install_dict)
 
-        # Return data or raw or both
-        match ret:
-            case DabPumpsRet.DATA: return device_map
-            case DabPumpsRet.RAW: return raw
-            case DabPumpsRet.BOTH: return (device_map, raw)
+        # return raw response so we can use it again for parsing the device-details
+        return raw
 
 
-    async def async_fetch_device_details(self, serial: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
-        """
-        Fetch the extra details for a DAB Pumps device
-
-        This function should be run AFTER async_fetch_device_config
-        """
-    
-        # If needed retrieve data via REST request. Apply retrieved or passed data.
-        # This is actually the same data as used for statusses
-        raw = await self.async_fetch_device_statusses(serial, raw=raw, ret=DabPumpsRet.RAW)
-        
-        # Process the resulting raw data
-        device = self._device_map[serial]
-        device_dict = device._asdict()
-        device_changed = False
-
-        # Search for specific statusses
-        for attr,keys in DEVICE_ATTR_EXTRA.items():
-            for key in keys:
-
-                # Try to find a status for this key and device
-                status = next( (status for status in self._status_actual_map.values() if status.serial==serial and status.key==key), None)
-                
-                if status is not None and status.value is not None:
-                    # Found it. Update the device attribute (workaround via dict because it is a namedtuple)
-                    if getattr(device, attr) != status.value:
-                        _LOGGER.debug(f"Found extra device attribute {serial} {attr} = {status.value}")
-                        device_dict[attr] = status.value
-                        device_changed = True
-
-        # Remember/update the found device details
-        if device_changed:
-            self._device_map[serial] = DabPumpsDevice(**device_dict)
-
-        self._device_detail_ts = datetime.now()
-
-        # Return data or raw or both
-        match ret:
-            case DabPumpsRet.DATA: return self._device_map[serial]
-            case DabPumpsRet.RAW: return raw
-            case DabPumpsRet.BOTH: return (self._device_map[serial], raw)
-
-
-    async def async_fetch_device_config(self, config_id: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
-        """Fetch the statusses for a DAB Pumps device, which then constitues the Sensors"""
+    async def _async_fetch_device_config(self, config_id: str):
+        """Fetch the statuses for a DAB Pumps device, which then constitues the Sensors"""
 
         # Retrieve data via REST request
-        if raw is None:
-            match self._fetch_method:
-                case DabPumpsFetch.DABCS:    url = DCONNECT_API_URL + f"/api/v1/configuration/{config_id}"  # No specific method for DABCS identified yet
-                case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + f"/api/v1/configuration/{config_id}"
+        match self._fetch_method:
+            case DabPumpsFetch.DABCS:    url = DCONNECT_API_URL + f"/api/v1/configuration/{config_id}"  # No specific method for DABCS identified yet
+            case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + f"/api/v1/configuration/{config_id}"
 
-            context = f"configuration {config_id}"
-            request = {
-                "method": "GET",
-                "url":  url,
-            }
-            
-            _LOGGER.debug(f"Retrieve device config for '{config_id}' via {request["method"]} {request["url"]}")
-            raw = await self._async_send_request(context, request)
+        context = f"configuration {config_id}"
+        request = {
+            "method": "GET",
+            "url":  url,
+        }
+        
+        _LOGGER.debug(f"Retrieve device config for '{config_id}' via {request["method"]} {request["url"]}")
+        raw = await self._async_send_request(context, request)
 
         # Process the resulting raw data
         # For DConnect (and DABCS):
@@ -1056,31 +1044,10 @@ class DabPumpsApi:
         # Merge with configurations from other devices
         self._config_map_ts = datetime.now()
         self._config_map.update(config_map)
-
-        # Return data or raw or both
-        match ret:
-            case DabPumpsRet.DATA: return config
-            case DabPumpsRet.RAW: return raw
-            case DabPumpsRet.BOTH: return (config, raw)
         
-        
-    async def async_fetch_device_statusses(self, serial: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
-        """Fetch the statusses for a DAB Pumps device"""
 
-        # also re-generate static statusses for this device serial
-        await self._async_fetch_static_statusses(serial)
-
-        (data, raw) = await self._async_fetch_device_statusses(serial, raw, ret=DabPumpsRet.BOTH)
-
-        # Return data or raw or both
-        match ret:
-            case DabPumpsRet.DATA: return self.status_map
-            case DabPumpsRet.RAW: return raw
-            case DabPumpsRet.BOTH: return (self.status_map, raw)
-
-
-    async def _async_fetch_static_statusses(self, serial: str):
-        """Fetch the static statusses for a DAB Pumps device"""
+    async def _async_fetch_static_statuses(self, serial: str):
+        """Fetch the static statuses for a DAB Pumps device"""
 
         # Process the existing data
         status_map = {}
@@ -1127,71 +1094,67 @@ class DabPumpsApi:
                 )
                 status_map[status_key] = status_new 
 
-        # Merge with statusses from other devices
+        # Merge with statuses from other devices
         self._status_static_map_ts = datetime.now()
         self._status_static_map.update(status_map)
         
         
-    async def _async_fetch_device_statusses(self, serial: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
-        """Fetch the statusses for a DAB Pumps device"""
-    
-        device = self._device_map.get(serial, None)
-        if not device:
-            return
-        
-        install_id = device.install_id
+    async def _async_fetch_device_statuses(self, serial: str, raw_install_data: dict|None = None):
+        """Fetch the statuses for a DAB Pumps device"""
 
-        # Retrieve data via REST request
-        if raw is None:
-            match self._fetch_method:
-                case DabPumpsFetch.DABCS:    url = DABCS_API_URL + f"/mobile/v1/installations/{install_id}/dums"
-                case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + f"/dumstate/{serial}" # or f"/api/v1/dum/{serial}/state"
+        match self._fetch_method:
+            case DabPumpsFetch.DABCS:
+                raw = {}
+                if raw_install_data is None:
+                    # if no raw install data was passes to us, then fetch it now
+                    device = self._device_map.get(serial, None)
+                    if not device:
+                        raise DabPumpsApiError(f"Device serial '{serial}' was not found in device_map")
 
-            context = f"statusses {serial}"
-            request = {
-                "method": "GET",
-                "url": url,
-            }
-            
-            _LOGGER.debug(f"Retrieve device statusses for '{serial}' via {request["method"]} {request["url"]}")
-            raw = await self._async_send_request(context, request)
-        
+                    context = f"installation {device.install_id}"
+                    request = { "method": "GET", "url": DABCS_API_URL + f"/mobile/v1/installations/{device.install_id}/dums" }
+                    
+                    _LOGGER.debug(f"Retrieve installation statuses via {request["method"]} {request["url"]}")
+                    raw_install_data = await self._async_send_request(context, request)
+
+            case DabPumpsFetch.DCONNECT: 
+                # Raw install data does not contain statuses when using this method.
+                # Retrieve statuses specific for this device
+                raw_install_data = None
+
+                context = f"statuses {serial}"
+                request = { "method": "GET", "url": DCONNECT_API_URL + f"/dumstate/{serial}" } # or f"/api/v1/dum/{serial}/state"
+                
+                _LOGGER.debug(f"Retrieve device statuses for '{serial}' via {request["method"]} {request["url"]}")
+                raw = await self._async_send_request(context, request)
+                
         # Process the resulting raw data
-        # For DabCS: (we retrieve way too much information, but have not identified a more precise method yet)
-        # {
-        #   "dums": [
-        #     { 
-        #       "serial": "some_str", 
-        #       "statusts": "some_datetime", 
-        #       "status": { 
-        #          "key1": "value1", "key2": "value2", ... 
-        #       },
-        #       ...
-        #     },
-        #     ...
-        #   ]
-        # }
-        # For DConnect:
-        # {
-        #   "statusts": "some_datetime",
-        #   "status": {
-        #     "key1": "value1", "key2": "value2", ...
-        #   },
-        #   ...
-        # }
-
         status_map = {}
         statusts = ""
         values = {}
-        if "dums" in raw:
-            for dum in raw.get('dums', []):
-                dum_serial = dum.get('serial') or ''
 
+        if raw_install_data:  
+            # if we have raw install data that includes all devices, then find the correct device
+            # Expected structure   
+            # {
+            #   "dums": [
+            #     { "configuration_id": "guid3", "serial": "some_str", "statusts": "some_data", "status": { ... }, ... }
+            #   ]
+            # }
+            ins_dums = raw_install_data.get('dums', [])
+
+            for dum in ins_dums:
+                dum_serial = dum.get('serial', None) or ''
                 if dum_serial == serial:
                     statusts = dum.get('statusts') or ""
                     values = dum.get('status') or {}
                     break
         else:
+            # {
+            #   "statusts": "some_datetime",
+            #   "status": "{ "key1": "value1", "key2": "value2", ... }",   as string!
+            #   ...
+            # }
             statusts = raw.get('statusts') or ""
             status = raw.get('status') or "{}" # string!
             values = json.loads(status)
@@ -1222,7 +1185,7 @@ class DabPumpsApi:
                 # Resolve the coded value into the real world value
                 (item_val, item_unit) = self._decode_status_value(serial, item_key, item_code)
 
-                # Add it to our statusses
+                # Add it to our statuses
                 status_new = DabPumpsStatus(
                     serial = serial,
                     key = item_key,
@@ -1239,15 +1202,15 @@ class DabPumpsApi:
                 _LOGGER.warning(f"Exception while processing status for '{serial}:{item_key}': {e}")
 
         if len(status_map) == 0:
-            raise DabPumpsApiDataError(f"No statusses found for '{serial}'")
+            raise DabPumpsApiDataError(f"No statuses found for '{serial}'")
         
-        _LOGGER.debug(f"Statusses found for '{serial}' with {len(status_map)} values")
+        _LOGGER.debug(f"Statuses found for '{serial}' with {len(status_map)} values")
 
-        # Merge with statusses from other devices
+        # Merge with statuses from other devices
         self._status_actual_map_ts = datetime.now()
         self._status_actual_map.update(status_map)
 
-        # Cleanup statusses from this device that are no longer needed in _status_actual_map
+        # Cleanup statuses from this device that are no longer needed in _status_actual_map
         candidate_map = { k:v for k,v in self._status_actual_map.items() if v.serial == serial and not k in status_map }
 
         for status_key, status_old in candidate_map.items():
@@ -1263,14 +1226,40 @@ class DabPumpsApi:
                 
             # Status can be removed
             self._status_actual_map.pop(status_key, None)
+        
+        
+    async def _async_derive_device_details(self, serial: str):
+        """
+        Derive extra details for a DAB Pumps device
 
-        # Return data or raw or both
-        match ret:
-            case DabPumpsRet.DATA: return status_map
-            case DabPumpsRet.RAW: return raw
-            case DabPumpsRet.BOTH: return (status_map, raw)
-        
-        
+        This function should be run AFTER both _async_fetch_device_config and _async_fetch_device_statuses
+        """
+    
+        device = self._device_map[serial]
+        device_dict = device._asdict()
+        device_changed = False
+
+        # Search for specific statuses
+        for attr,keys in DEVICE_ATTR_EXTRA.items():
+            for key in keys:
+
+                # Try to find a status for this key and device
+                status = next( (status for status in self._status_actual_map.values() if status.serial==serial and status.key==key), None)
+                
+                if status is not None and status.value is not None:
+                    # Found it. Update the device attribute (workaround via dict because it is a namedtuple)
+                    if getattr(device, attr) != status.value:
+                        _LOGGER.debug(f"Found extra device attribute {serial} {attr} = {status.value}")
+                        device_dict[attr] = status.value
+                        device_changed = True
+
+        # Remember/update the found device details
+        if device_changed:
+            self._device_map[serial] = DabPumpsDevice(**device_dict)
+
+        self._device_detail_ts = datetime.now()
+
+
     async def async_change_device_status(self, serial: str, key: str, code: str|None=None, value: Any|None=None):
         """
         Set a new status value for a DAB Pumps device.
@@ -1329,24 +1318,18 @@ class DabPumpsApi:
         return True
     
 
-    async def async_fetch_strings(self, lang: str, raw: dict|None = None, ret: DabPumpsRet|None = DabPumpsRet.DATA):
+    async def async_fetch_strings(self, lang: str):
         """Get string translations"""
     
         # Retrieve data via REST request
-        if raw is None:
-            match self._fetch_method:
-                # No specific method for DABCS identified yet
-                case DabPumpsFetch.DABCS:    url = DCONNECT_API_URL + f"/resources/js/localization_{lang}.properties?format=JSON&fullmerge=1"  
-                case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + f"/resources/js/localization_{lang}.properties?format=JSON&fullmerge=1"
-
-            context = f"localization_{lang}"
-            request = {
-                "method": "GET",
-                "url": url,
-            }
-            
-            _LOGGER.debug(f"Retrieve language info via {request["method"]} {request["url"]}")
-            raw = await self._async_send_request(context, request)
+        context = f"localization_{lang}"
+        request = {
+            "method": "GET",
+            "url": DCONNECT_API_URL + f"/resources/js/localization_{lang}.properties?format=JSON&fullmerge=1",
+        }
+        
+        _LOGGER.debug(f"Retrieve language info via {request["method"]} {request["url"]}")
+        raw = await self._async_send_request(context, request)
 
         # Process the resulting raw data
         # For DConnect:
@@ -1371,12 +1354,6 @@ class DabPumpsApi:
         self._string_map_ts = datetime.now() if len(string_map) > 0 else datetime.min
         self._string_map_lang = language
         self._string_map = string_map
-
-        # Return data or raw or both
-        match ret:
-            case DabPumpsRet.DATA: return string_map
-            case DabPumpsRet.RAW: return raw
-            case DabPumpsRet.BOTH: return (string_map, raw)
 
 
     def get_status_value(self, serial: str, key: str) -> DabPumpsStatus:

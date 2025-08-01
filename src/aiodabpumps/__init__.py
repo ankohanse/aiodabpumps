@@ -10,11 +10,13 @@ from .dabpumps_api import (
     DabPumpsApiError, 
     DabPumpsApiHistoryItem, 
     DabPumpsApiHistoryDetail,
-    DabPumpsRet,
 )
 
 # for unit tests
 from  .dabpumps_client import (
     DabPumpsClient_Httpx, 
     DabPumpsClient_Aiohttp,
+)
+from .dabpumps_api import (
+    DabPumpsLogin,
 )
