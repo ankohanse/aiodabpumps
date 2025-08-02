@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import sys
+from datetime import datetime
 
 from aiodabpumps import DabPumpsApi
 
@@ -98,7 +99,8 @@ async def main():
                         logger.info(f"    {v.name}: {value_with_unit}")
 
             # Wait one minute and retrieve install statuses again
-            logger.info(f"wait")
+            logger.info("")
+            logger.info(f"wait ({datetime.now().strftime("%H:%M")})")
             await asyncio.sleep(60)
 
     except Exception as e:

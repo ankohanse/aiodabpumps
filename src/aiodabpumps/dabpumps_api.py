@@ -861,7 +861,7 @@ class DabPumpsApi:
 
             case DabPumpsFetch.DCONNECT:
                 # Needs to retrieve data per device
-                url = None
+                raw = None
 
         for serial in [ d.serial for d in self._device_map.values() if d.install_id==install_id ]:
             await self._async_fetch_device_statuses(serial, raw_install_data=raw)
@@ -1299,17 +1299,22 @@ class DabPumpsApi:
         
         # Update data via REST request
         context = f"set {status.serial}:{status.key}"
-        request = {
-            "method": "POST",
-            "url": DCONNECT_API_URL + f"/dum/{status.serial}",
-            "headers": {
-                'Content-Type': 'application/json',
-            },
-            "json": {
-                'key': status.key, 
-                'value': status.code
-            },
-        }
+
+        match self._fetch_method:
+            case DabPumpsFetch.DCONNECT:
+                request = {
+                    "method": "POST",
+                    "url": DCONNECT_API_URL + f"/dum/{status.serial}",
+                    "headers": {
+                        'Content-Type': 'application/json',
+                    },
+                    "json": {
+                        'key': status.key, 
+                        'value': status.code
+                    },
+                }
+            case DabPumpsFetch.DABCS:
+                raise DabPumpsApiError(f"Change Device Status is not yet implemented for H2D")
         
         _LOGGER.debug(f"Set device param for '{status.serial}:{status.key}' to '{value}' via {request["method"]} {request["url"]}")
         raw = await self._async_send_request(context, request)
