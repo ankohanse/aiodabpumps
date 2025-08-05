@@ -177,13 +177,17 @@ async def test_login_seq(name, usr, pwd, exp_except, request):
 @pytest.mark.parametrize(
     "name, method, loop, exp_except",
     [
-        ("ok",   'Auto',                      0, None),
-        ("ok",   DabPumpsLogin.H2D_APP,       0, None),
-        ("ok",   DabPumpsLogin.DABLIVE_APP_0, 0, None),
-        ("ok",   DabPumpsLogin.DABLIVE_APP_1, 0, None),
-        ("ok",   DabPumpsLogin.DCONNECT_APP,  0, None),
-        ("ok",   DabPumpsLogin.DCONNECT_WEB,  0, None),
-        # ("loop", "Auto", 24*60, None),    # Run 1 full day
+        ("ok",  'Auto',                      0, None),
+        ("ok",  DabPumpsLogin.H2D_APP,       0, None),
+        ("ok",  DabPumpsLogin.DABLIVE_APP_0, 0, None),
+        ("ok",  DabPumpsLogin.DABLIVE_APP_1, 0, None),
+        ("ok",  DabPumpsLogin.DCONNECT_APP,  0, None),
+        ("ok",  DabPumpsLogin.DCONNECT_WEB,  0, None),
+        ("24h", "Auto",                      24*60, None),    # Run 1 full day
+        ("24h", DabPumpsLogin.H2D_APP,       24*60, None),    # Run 1 full day
+        ("24h", DabPumpsLogin.DABLIVE_APP_1, 24*60, None),    # Run 1 full day
+        ("24h", DabPumpsLogin.DCONNECT_APP,  24*60, None),    # Run 1 full day
+        ("24h", DabPumpsLogin.DCONNECT_WEB,  24*60, None),    # Run 1 full day
     ]
 )
 async def test_get_data(name, method, loop, exp_except, request):
@@ -294,12 +298,23 @@ async def test_get_data(name, method, loop, exp_except, request):
             _LOGGER.warning(f"Fail: {ex}")
 
         if loop:
-            await asyncio.sleep(60)
+            # Simulate failure to recover from
+            #if idx % 6 == 0:
+            #    await context.api._async_logout("simulate failure")
+            #elif idx % 3 == 0:
+            #    await context.api._async_logout("login force refresh", DabPumpsLogin.ACCESS_TOKEN)
+
+            if method != "Auto":
+                context.api._login_method = method
+
             _LOGGER.debug(f"Loop test, {idx} of {loop} (success={counter_success}, fail={counter_fail})")
+            await asyncio.sleep(60)
 
     _LOGGER.info(f"Fail summary after {loop} loops:")
     for reason,count in reason_fail.items():
         _LOGGER.info(f"  {count}x {reason}")
+
+    assert counter_fail == 0
 
 
 @pytest.mark.asyncio

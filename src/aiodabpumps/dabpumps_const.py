@@ -4,12 +4,11 @@ import types
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
-DABPUMPS_SSO_URL = "https://dabsso.dabpumps.com"
-DABPUMPS_API_TOKEN_TIME_MIN = 10 # seconds remaining before we re-login
-DABPUMPS_API_LOGIN_TIME_VALID = 30 * 60 # 30 minutes before we require re-login
+DABSSO_API_URL = "https://dabsso.dabpumps.com"
 
 # DABCS is used for H2D_APP
 DABCS_API_URL = "https://api.eu.dabcs.it"
+DABCS_API_DOMAIN = "api.eu.dabcs.it"
 DABCS_INIT_URL = DABCS_API_URL + "/mobile/v1/initialconfig"
 DABCS_ACCESS_TOKEN_VALID = 5*60  # 5 minutes in seconds
 DABCS_REFRESH_TOKEN_VALID = 30*24*60*60 # 30 days in seconds
