@@ -829,13 +829,13 @@ class DabPumpsApi:
 
         # First retrieve all device configs
         for config_id in [ d.config_id for d in self._device_map.values() if d.install_id==install_id ]:
-            await self._async_fetch_device_config(install_id, config_id, raw_install_data=raw)
+            await self._async_fetch_device_config(config_id, raw_install_data=raw)
 
         # Next, generate static statuses from the device configs
         # and retrieve inital device statuses
         for serial in [ d.serial for d in self._device_map.values() if d.install_id==install_id ]:
             await self._async_fetch_static_statuses(serial)
-            await self._async_fetch_device_statuses(install_id, serial, raw_install_data=raw)
+            await self._async_fetch_device_statuses(serial, raw_install_data=raw)
 
             # Finally, derive extra device details
             await self._async_derive_device_details(serial)
@@ -862,7 +862,7 @@ class DabPumpsApi:
                 raw = None
 
         for serial in [ d.serial for d in self._device_map.values() if d.install_id==install_id ]:
-            await self._async_fetch_device_statuses(install_id, serial, raw_install_data=raw)
+            await self._async_fetch_device_statuses(serial, raw_install_data=raw)
         
         
     async def _async_fetch_install_devices(self, install_id: str):
@@ -960,20 +960,34 @@ class DabPumpsApi:
         return raw
 
 
-    async def _async_fetch_device_config(self, install_id: str, config_id: str, raw_install_data: dict|None = None):
+    async def _async_fetch_device_config(self, config_id: str, raw_install_data: dict|None = None):
         """Fetch the statuses for a DAB Pumps device, which then constitues the Sensors"""
 
         # Retrieve data via REST request
+        conf = {}
+        conf_id = None
+
         match self._fetch_method:
             case DabPumpsFetch.DABCS:
-                raw = {}
                 if raw_install_data is None:
-                    # if no raw install data was passes to us, then fetch it now
-                    context = f"installation {install_id}"
-                    request = { "method": "GET", "url": DABCS_API_URL + f"/mobile/v1/installations/{install_id}/dums?include_configuration=true" }
-                    
-                    _LOGGER.debug(f"Retrieve installation configs via {request["method"]} {request["url"]}")
-                    raw_install_data = await self._async_send_request(context, request)
+                    raise DabPumpsApiError("No raw install data was passed to function _async_fetch_device_config")
+
+                # We have raw install data that includes all configurations; find the correct config
+                # {
+                #   "dums": [ ... ],
+                #   "configurations": [
+                #     { 
+                #        "guid": { "family": "str", "ProductName": "str", "params": [...], ... } 
+                #     }
+                #   ]
+                # }
+                ins_configs = raw_install_data.get('configurations', [])
+
+                for ins_config_id, ins_config in ins_configs.items():
+                    if ins_config_id == config_id:
+                        conf = ins_config
+                        conf_id = ins_config_id
+                        break
 
             case DabPumpsFetch.DCONNECT: 
                 raw_install_data = None
@@ -984,30 +998,13 @@ class DabPumpsApi:
                 _LOGGER.debug(f"Retrieve device config for '{config_id}' via {request["method"]} {request["url"]}")
                 raw = await self._async_send_request(context, request)
 
+                # {
+                #    "configuration_id": "id", "name": "some_name", "label": "some_str", "description": "some_str", "metadata": { ... }, ... }
+                # }
+                conf = raw
+                conf_id = None
+
         # Process the resulting raw data
-        if raw_install_data:  
-            # if we have raw install data that includes all devices, then find the correct device
-            # Expected structure   
-            # {
-            #   "dums": [ ... ],
-            #   "configurations": [
-            #     { 
-            #        "guid": { "family": "str", "ProductName": "str", "params": [...], ... } 
-            #     }
-            #   ]
-            # }
-            ins_configs = raw_install_data.get('configurations', [])
-
-            for conf_id, conf in ins_configs.items():
-                if conf_id == config_id:
-                    break
-        else:
-            # {
-            #    "configuration_id": "id", "name": "some_name", "label": "some_str", "description": "some_str", "metadata": { ... }, ... }
-            # }
-            conf = raw
-            conf_id = None
-
         config_map = {}
 
         conf_id = conf_id or conf.get('configuration_id', '')
@@ -1124,62 +1121,52 @@ class DabPumpsApi:
         self._status_static_map.update(status_map)
         
         
-    async def _async_fetch_device_statuses(self, install_id: str, serial: str, raw_install_data: dict|None = None):
+    async def _async_fetch_device_statuses(self, serial: str, raw_install_data: dict|None = None):
         """Fetch the statuses for a DAB Pumps device"""
+
+        statusts = ""
+        values = {}
 
         match self._fetch_method:
             case DabPumpsFetch.DABCS:
-                raw = {}
                 if raw_install_data is None:
-                    # if no raw install data was passes to us, then fetch it now
-                    context = f"statuses {install_id}"
-                    request = { "method": "GET", "url": DABCS_API_URL + f"/mobile/v1/installations/{install_id}/dums" }
-                    
-                    _LOGGER.debug(f"Retrieve installation statuses via {request["method"]} {request["url"]}")
-                    raw_install_data = await self._async_send_request(context, request)
-
+                    raise DabPumpsApiError("No raw install data was passed to function _async_fetch_device_statuses")
+            
+                # We have raw install data that includes all devices; find the correct device
+                # {
+                #   "dums": [
+                #     { "configuration_id": "guid3", "serial": "some_str", "statusts": "some_data", "status": { ... }, ... }
+                #   ]
+                # }
+                ins_dums = raw_install_data.get('dums', [])
+            
+                for dum in ins_dums:
+                    dum_serial = dum.get('serial', None) or ''
+                    if dum_serial == serial:
+                        statusts = dum.get('statusts') or ""
+                        values = dum.get('status') or {}
+                        break
+        
             case DabPumpsFetch.DCONNECT: 
                 # Raw install data does not contain statuses when using this method.
                 # Retrieve statuses specific for this device
-                raw_install_data = None
-
                 context = f"statuses {serial}"
                 request = { "method": "GET", "url": DCONNECT_API_URL + f"/dumstate/{serial}" } # or f"/api/v1/dum/{serial}/state"
                 
                 _LOGGER.debug(f"Retrieve device statuses for '{serial}' via {request["method"]} {request["url"]}")
                 raw = await self._async_send_request(context, request)
                 
+                # {
+                #   "statusts": "some_datetime",
+                #   "status": "{ "key1": "value1", "key2": "value2", ... }",   as string!
+                #   ...
+                # }
+                statusts = raw.get('statusts') or ""
+                status = raw.get('status') or "{}" # string!
+                values = json.loads(status)
+
         # Process the resulting raw data
         status_map = {}
-        statusts = ""
-        values = {}
-
-        if raw_install_data:  
-            # if we have raw install data that includes all devices, then find the correct device
-            # Expected structure   
-            # {
-            #   "dums": [
-            #     { "configuration_id": "guid3", "serial": "some_str", "statusts": "some_data", "status": { ... }, ... }
-            #   ]
-            # }
-            ins_dums = raw_install_data.get('dums', [])
-
-            for dum in ins_dums:
-                dum_serial = dum.get('serial', None) or ''
-                if dum_serial == serial:
-                    statusts = dum.get('statusts') or ""
-                    values = dum.get('status') or {}
-                    break
-        else:
-            # {
-            #   "statusts": "some_datetime",
-            #   "status": "{ "key1": "value1", "key2": "value2", ... }",   as string!
-            #   ...
-            # }
-            statusts = raw.get('statusts') or ""
-            status = raw.get('status') or "{}" # string!
-            values = json.loads(status)
-
         status_ts = datetime.fromisoformat(statusts) if statusts else datetime.now(timezone.utc)
 
         for item_key, item_code in values.items():
