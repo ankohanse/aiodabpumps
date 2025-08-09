@@ -8,8 +8,6 @@ from .dabpumps_api import (
     DabPumpsApiAuthError, 
     DabPumpsApiDataError, 
     DabPumpsApiError, 
-    DabPumpsApiHistoryItem, 
-    DabPumpsApiHistoryDetail,
 )
 from .dabpumps_data import (
     DabPumpsUserRole,
@@ -19,6 +17,9 @@ from .dabpumps_data import (
     DabPumpsConfig,
     DabPumpsParams,
     DabPumpsStatus,
+    DabPumpsHistoryItem,
+    DabPumpsHistoryDetail,
+    DabPumpsDictFactory,
 )
 
 # for unit tests

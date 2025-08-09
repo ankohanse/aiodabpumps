@@ -80,3 +80,62 @@ class DabPumpsStatus:
     update_ts: datetime|None
 
 
+@dataclass
+class DabPumpsHistoryItem:
+    ts: datetime
+    op: str
+    rsp: str|None = None
+ 
+    def create(timestamp: datetime, context: str , request: dict|None, response: dict|None, token: dict|None) -> 'DabPumpsHistoryItem':
+        # If possible, add a summary of the response status and json res and code
+        rsp = None
+        if response:
+            rsp_parts = []
+            if "status_code" in response:
+                rsp_parts.append(response["status_code"])
+            if "status" in response:
+                rsp_parts.append(response["status"])
+            
+            if json := response.get("json", None):
+                if res := json.get('res', ''): rsp_parts.append(f"res={res}")
+                if code := json.get('code', ''): rsp_parts.append(f"code={code}")
+                if msg := json.get('msg', ''): rsp_parts.append(f"msg={msg}")
+                if details := json.get('details', ''): rsp_parts.append(f"details={details}")
+
+            rsp = ', '.join(rsp_parts)
+
+        item = DabPumpsHistoryItem( 
+            ts = timestamp, 
+            op = context,
+            rsp = rsp,
+        )
+        return item
+
+
+@dataclass
+class DabPumpsHistoryDetail:
+    ts: datetime
+    req: dict|None
+    rsp: dict|None
+    token: dict|None
+
+    def create(timestamp: datetime, context: str , request: dict|None, response: dict|None, token: dict|None) -> 'DabPumpsHistoryDetail':
+        detail = DabPumpsHistoryDetail(
+            ts = timestamp, 
+            req = request,
+            rsp = response,
+            token = token,
+        )
+        return detail
+
+
+class DabPumpsDictFactory:
+    @staticmethod
+    def exclude_none_values(x):
+        """
+        Usage:
+          item = DabPumpsHistoryItem(...)
+          item_as_dict = asdict(item, dict_factory=DabPumpsDictFactory.exclude_none_values)
+        """
+        return { k: v for (k, v) in x if v is not None }
+

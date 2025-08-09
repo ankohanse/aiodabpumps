@@ -59,6 +59,8 @@ from .dabpumps_data import (
     DabPumpsConfig,
     DabPumpsParams,
     DabPumpsStatus,
+    DabPumpsHistoryItem,
+    DabPumpsHistoryDetail,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1570,11 +1572,11 @@ class DabPumpsApi:
             return None
     
 
-    async def _async_update_diagnostics(self, timestamp, context: str, request: dict|None, response: dict|None, token: dict|None = None):
+    async def _async_update_diagnostics(self, timestamp: datetime, context: str, request: dict|None, response: dict|None, token: dict|None = None):
 
         if self._diagnostics_callback:
-            item = DabPumpsApiHistoryItem(timestamp, context, request, response, token)
-            detail = DabPumpsApiHistoryDetail(timestamp, context, request, response, token)
+            item = DabPumpsHistoryItem.create(timestamp, context, request, response, token)
+            detail = DabPumpsHistoryDetail.create(timestamp, context, request, response, token)
             data = {
                 "login_time": self._login_time,
                 "login_method": self._login_method,
@@ -1597,45 +1599,3 @@ class DabPumpsApiError(Exception):
 class DabPumpsApiDataError(Exception):
     """Exception to indicate generic data failure."""  
 
-
-class DabPumpsApiHistoryItem(dict):
-    def __init__(self, timestamp, context: str , request: dict|None, response: dict|None, token: dict|None):
-        item = { 
-            "ts": timestamp, 
-            "op": context,
-        }
-
-        # If possible, add a summary of the response status and json res and code
-        if response:
-            rsp = []
-            if "status_code" in response:
-                rsp.append(response["status_code"])
-            if "status" in response:
-                rsp.append(response["status"])
-            
-            if json := response.get("json", None):
-                if res := json.get('res', ''): rsp.append(f"res={res}")
-                if code := json.get('code', ''): rsp.append(f"code={code}")
-                if msg := json.get('msg', ''): rsp.append(f"msg={msg}")
-                if details := json.get('details', ''): rsp.append(f"details={details}")
-
-            item["rsp"] = ', '.join(rsp)
-
-        # add as new history item
-        super().__init__(item)
-
-
-class DabPumpsApiHistoryDetail(dict):
-    def __init__(self, timestamp, context: str, request: dict|None, response: dict|None, token: dict|None):
-        item = { 
-            "ts": timestamp, 
-        }
-
-        if request:
-            item["req"] = request
-        if response:
-            item["rsp"] = response
-        if token:
-            item["token"] = token
-
-        super().__init__(item)

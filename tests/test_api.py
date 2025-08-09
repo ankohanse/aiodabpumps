@@ -7,20 +7,19 @@ import pytest_asyncio
 
 from aiodabpumps import (
     DabPumpsApi,
+    DabPumpsApiAuthError,
+    DabPumpsApiError, 
     DabPumpsInstall,
     DabPumpsDevice,
     DabPumpsConfig,
     DabPumpsParams,
     DabPumpsStatus,
-    DabPumpsApiAuthError,
-    DabPumpsApiError, 
-    DabPumpsApiHistoryItem, 
-    DabPumpsApiHistoryDetail,
+    DabPumpsParamType,
+    DabPumpsUserRole,
+    DabPumpsHistoryItem, 
+    DabPumpsHistoryDetail,
     DabPumpsLogin,
 )
-from aiodabpumps.dabpumps_data import (
-    DabPumpsParamType
-) 
 
 from . import TEST_USERNAME, TEST_PASSWORD
 
@@ -197,6 +196,9 @@ async def test_get_data(name, method, loop, exp_except, request):
     context = request.getfixturevalue("context")
     context.api = DabPumpsApi(TEST_USERNAME, TEST_PASSWORD)
     assert context.api.closed == False
+
+    # Try set diagnostics callback function
+    context.api.set_diagnostics(lambda context,item,detail,data: None)
 
     # Login
     match method:
