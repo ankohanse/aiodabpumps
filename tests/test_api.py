@@ -18,6 +18,9 @@ from aiodabpumps import (
     DabPumpsApiHistoryDetail,
     DabPumpsLogin,
 )
+from aiodabpumps.dabpumps_data import (
+    DabPumpsParamType
+) 
 
 from . import TEST_USERNAME, TEST_PASSWORD
 
@@ -480,10 +483,10 @@ async def config_map():
             label = 'test label',
             description = 'test description',
             meta_params = {
-                "KEY_ENUM":  DabPumpsParams(key='KEY_ENUM',  type='enum',    unit=None, weight=None, values={'1':'one', '2':'two', '3':'three'}, min=1, max=3, family='f', group='g', view='CSIR', change='', log='', report=''),
-                "KEY_FLOAT": DabPumpsParams(key='KEY_FLOAT', type='measure', unit='F',  weight=0.1,  values=None, min=0, max=1,  family='f', group='g', view='CSIR', change='', log='', report=''),
-                "KEY_INT":   DabPumpsParams(key='KEY_INT',   type='measure', unit='I',  weight=1,    values=None, min=0, max=10, family='f', group='g', view='CSIR', change='', log='', report=''),
-                "KEY_LABEL": DabPumpsParams(key='KEY_LABEL', type='label',   unit='',   weight=None, values=None, min=0, max=0,  family='f', group='g', view='CSIR', change='', log='', report=''),
+                "KEY_ENUM":  DabPumpsParams(key='KEY_ENUM',  type=DabPumpsParamType.ENUM,    unit=None, weight=None, values={'1':'one', '2':'two', '3':'three'}, min=1, max=3, family='f', group='g', view='CSIR', change='', log='', report=''),
+                "KEY_FLOAT": DabPumpsParams(key='KEY_FLOAT', type=DabPumpsParamType.MEASURE, unit='F',  weight=0.1,  values=None, min=0, max=1,  family='f', group='g', view='CSIR', change='', log='', report=''),
+                "KEY_INT":   DabPumpsParams(key='KEY_INT',   type=DabPumpsParamType.MEASURE, unit='I',  weight=1,    values=None, min=0, max=10, family='f', group='g', view='CSIR', change='', log='', report=''),
+                "KEY_LABEL": DabPumpsParams(key='KEY_LABEL', type=DabPumpsParamType.LABEL,   unit='',   weight=None, values=None, min=0, max=0,  family='f', group='g', view='CSIR', change='', log='', report=''),
             }
         ),
     }
@@ -619,11 +622,11 @@ async def test_status(name, serial, key, exp_code, exp_value, exp_unit, request)
         ("device unknown", 'SERIAL_XX', 'KEY_ENUM', False, None, None, None),
         ("device unknown", 'SERIAL_XX', 'KEY_ENUM', False, None, None, None),
         ("key unknown", 'SERIAL', 'KEY_XX', False, None, None, None),
-        ("enum ok", "SERIAL", 'KEY_ENUM', False, 'enum', {'1':'one', '2':'two', '3':'three'}, None),
-        ("enum ok", "SERIAL", 'KEY_ENUM', True, 'enum', {'1':'een', '2':'twee', '3':'drie'}, None),
-        ("float ok", "SERIAL", 'KEY_FLOAT', False, 'measure', None, 'F'),
-        ("int ok", "SERIAL", 'KEY_INT', False, 'measure', None, 'I'),
-        ("label ok", "SERIAL", 'KEY_LABEL', False, 'label', None, ''),
+        ("enum ok", "SERIAL", 'KEY_ENUM', False, DabPumpsParamType.ENUM, {'1':'one', '2':'two', '3':'three'}, None),
+        ("enum ok", "SERIAL", 'KEY_ENUM', True, DabPumpsParamType.ENUM, {'1':'een', '2':'twee', '3':'drie'}, None),
+        ("float ok", "SERIAL", 'KEY_FLOAT', False, DabPumpsParamType.MEASURE, None, 'F'),
+        ("int ok", "SERIAL", 'KEY_INT', False, DabPumpsParamType.MEASURE, None, 'I'),
+        ("label ok", "SERIAL", 'KEY_LABEL', False, DabPumpsParamType.LABEL, None, ''),
     ]
 )
 async def test_metadata(name, serial, key, translate, exp_type, exp_values, exp_unit, request):

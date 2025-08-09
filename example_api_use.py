@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import sys
+
+from dataclasses import asdict
 from datetime import datetime
 
 from aiodabpumps import DabPumpsApi
@@ -65,7 +67,7 @@ async def main():
             # Log the retrieved info
             logger.info("")
             logger.info(f"device: {device.name} ({device.serial})")                
-            for k,v in device._asdict().items():
+            for k,v in asdict(device).items():
                 logger.info(f"    {k}: {v}")
 
             config = api.config_map[device.config_id]                     

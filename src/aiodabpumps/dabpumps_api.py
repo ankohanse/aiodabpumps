@@ -15,7 +15,7 @@ import logging
 import re
 import time
 
-from collections import namedtuple
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum, StrEnum
 from typing import Any
@@ -51,15 +51,18 @@ from .dabpumps_client import (
     DabPumpsClient_Httpx,
     DabPumpsClient_Aiohttp,
 )
-
+from .dabpumps_data import (
+    DabPumpsUserRole,
+    DabPumpsParamType,
+    DabPumpsInstall,
+    DabPumpsDevice,
+    DabPumpsConfig,
+    DabPumpsParams,
+    DabPumpsStatus,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-DabPumpsInstall = namedtuple('DabPumpsInstall', 'id, name, description, company, address, role, devices')
-DabPumpsDevice = namedtuple('DabPumpsDevice', 'id, serial, name, vendor, product, hw_version, sw_version, mac_address, config_id, install_id')
-DabPumpsConfig = namedtuple('DabPumpsConfig', 'id, label, description, meta_params')
-DabPumpsParams = namedtuple('DabPumpsParams', 'key, type, unit, weight, values, min, max, family, group, view, change, log, report')
-DabPumpsStatus = namedtuple('DabPumpsStatus', 'serial, key, name, code, value, unit, status_ts, update_ts')
 
 class DabPumpsLogin(StrEnum):
     ACCESS_TOKEN = 'Access-Token'
@@ -796,7 +799,7 @@ class DabPumpsApi:
                 description = installation.get('description', None) or '',
                 company = installation.get('company', None) or install_meta.get('company', None) or '',
                 address = installation.get('address', None) or install_meta.get('address', None) or '',
-                role = installation.get('current_user_role', None) or installation.get('user_role', None) or 'CUSTOMER',
+                role = installation.get('current_user_role', None) or installation.get('user_role', None) or DabPumpsUserRole.CUSTOMER,
                 devices = len(installation.get('dums', None) or []),
             )
             install_map[install_id] = install
@@ -949,9 +952,7 @@ class DabPumpsApi:
         #    user_role_new != user_role_old:
         
         #     _LOGGER.debug(f"Override install role from '{user_role_old}' to '{user_role_new}' for installation id '{install_id}'")
-        #     install_dict = self._install_map[install_id]._asdict()
-        #     install_dict["role"] = user_role_new
-        #     self._install_map[install_id] = DabPumpsInstall(**install_dict)
+        #     self._install_map[install_id].role = user_role_new
 
         # return raw response so we can use it again for parsing the device-details
         return raw
@@ -1094,7 +1095,7 @@ class DabPumpsApi:
                 value = None
 
             # Detect 'button' params (type 'enum' with only one possible value)
-            if params.type == 'enum' and len(params.values or []) == 1:
+            if params.type == DabPumpsParamType.ENUM and len(params.values or []) == 1:
                 is_static = True
                 code = str(params.min) if params.min is not None else "0"
                 value = ""
@@ -1254,8 +1255,6 @@ class DabPumpsApi:
         """
     
         device = self._device_map[serial]
-        device_dict = device._asdict()
-        device_changed = False
 
         # Search for specific statuses
         for attr,keys in DEVICE_ATTR_EXTRA.items():
@@ -1268,12 +1267,7 @@ class DabPumpsApi:
                     # Found it. Update the device attribute (workaround via dict because it is a namedtuple)
                     if getattr(device, attr) != status.value:
                         _LOGGER.debug(f"Found extra device attribute {serial} {attr} = {status.value}")
-                        device_dict[attr] = status.value
-                        device_changed = True
-
-        # Remember/update the found device details
-        if device_changed:
-            self._device_map[serial] = DabPumpsDevice(**device_dict)
+                        setattr(device, attr, status.value)
 
         self._device_detail_ts = datetime.now()
 
@@ -1312,15 +1306,15 @@ class DabPumpsApi:
         _LOGGER.info(f"Set {serial}:{key} from {status.value} to {value} ({code})")
         
         # update the cached value in status_map
-        status = status._replace(code=code, value=value, update_ts=datetime.now(timezone.utc))
-        self._status_actual_map[status_key] = status
+        status_upd = replace(status, code = code, value = value, update_ts = datetime.now(timezone.utc))
+        self._status_actual_map[status_key] = status_upd
         
         # Update data via REST request
-        context = f"set {status.serial}:{status.key}"
+        context = f"set {status_upd.serial}:{status_upd.key}"
 
         match self._fetch_method:
-            case DabPumpsFetch.DABCS: url = DABCS_API_URL + f"/mobile/v1/dums/{status.serial}/setparam?skipLogging=false"
-            case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + f"/dum/{status.serial}"
+            case DabPumpsFetch.DABCS: url = DABCS_API_URL + f"/mobile/v1/dums/{status_upd.serial}/setparam?skipLogging=false"
+            case DabPumpsFetch.DCONNECT: url = DCONNECT_API_URL + f"/dum/{status_upd.serial}"
         
         request = {
             "method": "POST",
@@ -1329,8 +1323,8 @@ class DabPumpsApi:
                 'Content-Type': 'application/json',
             },
             "json": {
-                'key': status.key, 
-                'value': status.code
+                'key': status_upd.key, 
+                'value': status_upd.code
             },
         }
         
@@ -1401,9 +1395,7 @@ class DabPumpsApi:
 
         # Apply translations
         if translate and params is not None and params.values is not None:
-            params_dict = params._asdict()
-            params_dict['values'] = { k:self._translate_string(v) for k,v in params.values.items() }
-            params = DabPumpsParams(**params_dict)
+            params = replace(params, values = { k:self._translate_string(v) for k,v in params.values.items() })
 
         return params
 
@@ -1422,11 +1414,11 @@ class DabPumpsApi:
         
         # param:DabPumpsParam - 'key, type, unit, weight, values, min, max, family, group, view, change, log, report'
         match params.type:
-            case 'enum':
+            case DabPumpsParamType.ENUM:
                 # Lookup value and translate
                 value = self._translate_string(params.values.get(code, code))
 
-            case 'measure':
+            case DabPumpsParamType.MEASURE:
                 if code != '':
                     if params.weight and params.weight != 1 and params.weight != 0:
                         # Convert to float
@@ -1438,7 +1430,7 @@ class DabPumpsApi:
                 else:
                     value = None
                     
-            case 'label':
+            case DabPumpsParamType.LABEL:
                 # Convert to string; no translation
                 value = str(code)
 
@@ -1464,12 +1456,12 @@ class DabPumpsApi:
         
         # param:DabPumpsParam - 'key, type, unit, weight, values, min, max, family, group, view, change, log, report'
         match params.type:
-            case 'enum':
+            case DabPumpsParamType.ENUM:
                 code = next( (str(k) for k,v in params.values.items() if v==value), None)
                 if code is None:
                     code = str(value)
 
-            case 'measure':
+            case DabPumpsParamType.MEASURE:
                 if params.weight and params.weight != 1 and params.weight != 0:
                     # Convert from float to int
                     code = str(int(round(value / params.weight)))
@@ -1477,7 +1469,7 @@ class DabPumpsApi:
                     # Convert to int
                     code = str(int(value))
                     
-            case 'label':
+            case DabPumpsParamType.LABEL:
                 # Convert to string
                 code = str(value)
 
@@ -1605,7 +1597,7 @@ class DabPumpsApiError(Exception):
 class DabPumpsApiDataError(Exception):
     """Exception to indicate generic data failure."""  
 
-    
+
 class DabPumpsApiHistoryItem(dict):
     def __init__(self, timestamp, context: str , request: dict|None, response: dict|None, token: dict|None):
         item = { 

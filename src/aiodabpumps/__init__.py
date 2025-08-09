@@ -11,6 +11,15 @@ from .dabpumps_api import (
     DabPumpsApiHistoryItem, 
     DabPumpsApiHistoryDetail,
 )
+from .dabpumps_data import (
+    DabPumpsUserRole,
+    DabPumpsParamType,
+    DabPumpsInstall,
+    DabPumpsDevice,
+    DabPumpsConfig,
+    DabPumpsParams,
+    DabPumpsStatus,
+)
 
 # for unit tests
 from  .dabpumps_client import (
