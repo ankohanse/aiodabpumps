@@ -86,9 +86,14 @@ class DabPumpsHistoryItem:
     op: str
     rsp: str|None = None
  
+    @staticmethod
     def create(timestamp: datetime, context: str , request: dict|None, response: dict|None, token: dict|None) -> 'DabPumpsHistoryItem':
+        item = DabPumpsHistoryItem( 
+            ts = timestamp, 
+            op = context,
+        )
+
         # If possible, add a summary of the response status and json res and code
-        rsp = None
         if response:
             rsp_parts = []
             if "status_code" in response:
@@ -102,13 +107,8 @@ class DabPumpsHistoryItem:
                 if msg := json.get('msg', ''): rsp_parts.append(f"msg={msg}")
                 if details := json.get('details', ''): rsp_parts.append(f"details={details}")
 
-            rsp = ', '.join(rsp_parts)
+            item.rsp = ', '.join(rsp_parts)
 
-        item = DabPumpsHistoryItem( 
-            ts = timestamp, 
-            op = context,
-            rsp = rsp,
-        )
         return item
 
 
@@ -119,6 +119,7 @@ class DabPumpsHistoryDetail:
     rsp: dict|None
     token: dict|None
 
+    @staticmethod
     def create(timestamp: datetime, context: str , request: dict|None, response: dict|None, token: dict|None) -> 'DabPumpsHistoryDetail':
         detail = DabPumpsHistoryDetail(
             ts = timestamp, 
