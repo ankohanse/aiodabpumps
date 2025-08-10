@@ -116,7 +116,6 @@ class DabPumpsApi:
         self._status_static_map: dict[str, DabPumpsStatus] = {}
         self._string_map: dict[str, str] = {}
         self._string_map_lang: str = None
-        self._user_role: str = 'CUSTOMER'
 
         self._install_map_ts: datetime = datetime.min
         self._device_map_ts: datetime = datetime.min
@@ -125,7 +124,6 @@ class DabPumpsApi:
         self._status_actual_map_ts: datetime = datetime.min
         self._status_static_map_ts: datetime = datetime.min
         self._string_map_ts: datetime = datetime.min
-        self._user_role_ts: datetime = datetime.min
 
         # Client (aiohttp or httpx) to keep track of cookies during login and subsequent calls
         # We keep the same client for the whole life of the api instance.
@@ -190,10 +188,6 @@ class DabPumpsApi:
     @property
     def string_map_lang(self) -> str:
         return self._string_map_lang
-    
-    @property
-    def user_role(self) -> str:
-        return self._user_role
 
     @property
     def install_map_ts(self) -> datetime:
@@ -219,10 +213,6 @@ class DabPumpsApi:
     def string_map_ts(self) -> datetime:
         return self._string_map_ts
     
-    @property
-    def user_role_ts(self) -> datetime:
-        return self._user_role_ts
-
     @property
     def closed(self) -> bool:
         if self._client:
@@ -944,19 +934,6 @@ class DabPumpsApi:
         for key in candidate_list:
             self._device_map.pop(key, None)
 
-        # For DConnect: we override the user role as detected when retrieving the installation list
-        # as the value there sometimes seems incorrect
-        # user_role_new = raw.get('user_role', None)
-        # user_role_old = self._install_map[install_id].role if install_id in self._install_map else None
-
-        # if user_role_new and \
-        #    user_role_old and \
-        #    user_role_new != user_role_old:
-        
-        #     _LOGGER.debug(f"Override install role from '{user_role_old}' to '{user_role_new}' for installation id '{install_id}'")
-        #     self._install_map[install_id].role = user_role_new
-
-        # return raw response so we can use it again for parsing the device-details
         return raw
 
 
