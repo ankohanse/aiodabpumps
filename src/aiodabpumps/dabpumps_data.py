@@ -44,7 +44,7 @@ class DabPumpsDevice:
 
 
 @dataclass
-class DabPumpsParam:
+class DabPumpsParams:
     key: str
     type: DabPumpsParamType
     unit: str
@@ -65,7 +65,7 @@ class DabPumpsConfig:
     id: str
     label: str
     description: str
-    meta_params: dict[str, DabPumpsParam]
+    meta_params: dict[str, DabPumpsParams]
 
     def __post_init__(self):
         """
@@ -76,7 +76,7 @@ class DabPumpsConfig:
             meta_param = self.meta_params[meta_key]
 
             if meta_param and isinstance(meta_param, dict):
-                self.meta_params[meta_key] = DabPumpsParam(**meta_param)
+                self.meta_params[meta_key] = DabPumpsParams(**meta_param)
 
 
 @dataclass

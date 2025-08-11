@@ -57,7 +57,7 @@ from .dabpumps_data import (
     DabPumpsInstall,
     DabPumpsDevice,
     DabPumpsConfig,
-    DabPumpsParam,
+    DabPumpsParams,
     DabPumpsStatus,
     DabPumpsHistoryItem,
     DabPumpsHistoryDetail,
@@ -1010,7 +1010,7 @@ class DabPumpsApi:
             values = meta_param.get('values') or []
             param_values = { str(v[0]): str(v[1]) for v in values if len(v) >= 2 }
             
-            param = DabPumpsParam(
+            param = DabPumpsParams(
                 key = param_name,
                 type = param_type,
                 unit = param_unit,
@@ -1349,7 +1349,7 @@ class DabPumpsApi:
         return self._status_actual_map.get(status_key, None) or self._status_static_map.get(status_key, None)
 
 
-    def get_status_metadata(self, serial: str, key: str, translate:bool = True) -> DabPumpsParam:
+    def get_status_metadata(self, serial: str, key: str, translate:bool = True) -> DabPumpsParams:
         """
         Resolve meta params for a status
         """
@@ -1378,7 +1378,7 @@ class DabPumpsApi:
         if params is None or code is None:
             return (code, '')
         
-        # param:DabPumpsParam - 'key, type, unit, weight, values, min, max, family, group, view, change, log, report'
+        # param:DabPumpsParams - 'key, type, unit, weight, values, min, max, family, group, view, change, log, report'
         match params.type:
             case DabPumpsParamType.ENUM:
                 # Lookup value and translate
@@ -1420,7 +1420,7 @@ class DabPumpsApi:
         if params is None or value is None:
             return str(value)
         
-        # param:DabPumpsParam - 'key, type, unit, weight, values, min, max, family, group, view, change, log, report'
+        # param:DabPumpsParams - 'key, type, unit, weight, values, min, max, family, group, view, change, log, report'
         match params.type:
             case DabPumpsParamType.ENUM:
                 code = next( (str(k) for k,v in params.values.items() if v==value), None)
