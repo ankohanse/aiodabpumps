@@ -44,7 +44,7 @@ class DabPumpsDevice:
 
 
 @dataclass
-class DabPumpsParams:
+class DabPumpsParam:
     key: str
     type: DabPumpsParamType
     unit: str
@@ -65,7 +65,18 @@ class DabPumpsConfig:
     id: str
     label: str
     description: str
-    meta_params: dict[str, DabPumpsParams]
+    meta_params: dict[str, DabPumpsParam]
+
+    def __post_init__(self):
+        """
+        Custom processing in case the dataclass was constructed from a dict
+        status = DabPumpsConfig(**dict)
+        """
+        for meta_key in self.meta_params:
+            meta_param = self.meta_params[meta_key]
+
+            if meta_param and isinstance(meta_param, dict):
+                self.meta_params[meta_key] = DabPumpsParam(**meta_param)
 
 
 @dataclass
@@ -78,6 +89,17 @@ class DabPumpsStatus:
     unit: str
     status_ts: datetime|None
     update_ts: datetime|None
+
+    def __post_init__(self):
+        """
+        Custom processing in case the dataclass was constructed from a dict
+        status = DabPumpsStatus(**dict)
+        """
+        if self.status_ts and isinstance(self.status_ts, str):
+            self.status_ts = datetime.fromisoformat(self.status_ts)
+
+        if self.update_ts and isinstance(self.update_ts, str):
+            self.update_ts = datetime.fromisoformat(self.update_ts)
 
 
 @dataclass

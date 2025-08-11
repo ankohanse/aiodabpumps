@@ -12,7 +12,7 @@ from aiodabpumps import (
     DabPumpsInstall,
     DabPumpsDevice,
     DabPumpsConfig,
-    DabPumpsParams,
+    DabPumpsParam,
     DabPumpsStatus,
     DabPumpsParamType,
     DabPumpsUserRole,
@@ -257,7 +257,7 @@ async def test_get_data(name, method, loop, exp_except, request):
 
         for param_name,param in config.meta_params.items():
             assert type(param_name) is str
-            assert type(param) is DabPumpsParams
+            assert type(param) is DabPumpsParam
             assert param.key is not None
 
             assert context.api.status_map is not None
@@ -485,10 +485,10 @@ async def config_map():
             label = 'test label',
             description = 'test description',
             meta_params = {
-                "KEY_ENUM":  DabPumpsParams(key='KEY_ENUM',  type=DabPumpsParamType.ENUM,    unit=None, weight=None, values={'1':'one', '2':'two', '3':'three'}, min=1, max=3, family='f', group='g', view='CSIR', change='', log='', report=''),
-                "KEY_FLOAT": DabPumpsParams(key='KEY_FLOAT', type=DabPumpsParamType.MEASURE, unit='F',  weight=0.1,  values=None, min=0, max=1,  family='f', group='g', view='CSIR', change='', log='', report=''),
-                "KEY_INT":   DabPumpsParams(key='KEY_INT',   type=DabPumpsParamType.MEASURE, unit='I',  weight=1,    values=None, min=0, max=10, family='f', group='g', view='CSIR', change='', log='', report=''),
-                "KEY_LABEL": DabPumpsParams(key='KEY_LABEL', type=DabPumpsParamType.LABEL,   unit='',   weight=None, values=None, min=0, max=0,  family='f', group='g', view='CSIR', change='', log='', report=''),
+                "KEY_ENUM":  DabPumpsParam(key='KEY_ENUM',  type=DabPumpsParamType.ENUM,    unit=None, weight=None, values={'1':'one', '2':'two', '3':'three'}, min=1, max=3, family='f', group='g', view='CSIR', change='', log='', report=''),
+                "KEY_FLOAT": DabPumpsParam(key='KEY_FLOAT', type=DabPumpsParamType.MEASURE, unit='F',  weight=0.1,  values=None, min=0, max=1,  family='f', group='g', view='CSIR', change='', log='', report=''),
+                "KEY_INT":   DabPumpsParam(key='KEY_INT',   type=DabPumpsParamType.MEASURE, unit='I',  weight=1,    values=None, min=0, max=10, family='f', group='g', view='CSIR', change='', log='', report=''),
+                "KEY_LABEL": DabPumpsParam(key='KEY_LABEL', type=DabPumpsParamType.LABEL,   unit='',   weight=None, values=None, min=0, max=0,  family='f', group='g', view='CSIR', change='', log='', report=''),
             }
         ),
     }
