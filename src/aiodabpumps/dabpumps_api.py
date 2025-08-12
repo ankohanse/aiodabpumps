@@ -1546,6 +1546,18 @@ class DabPumpsApi:
                 "login_method": self._login_method,
                 "fetch_method": self._fetch_method,
                 "auth_method": self._auth_method,
+                "extra_headers": self._extra_headers,
+
+                "access_token": self._access_token,
+                "access_expires_in": self._access_expires_in,
+                "access_expiry": self._access_expiry,
+                "refresh_token": self._refresh_token,
+                "refresh_expires_in": self._refresh_expires_in,
+                "refresh_expiry": self._refresh_expiry,
+                "refresh_client_id": self._refresh_client_id,
+                "refresh_client_secret": self._refresh_client_secret,
+
+                "string_map_lang": self.string_map_lang,
             }
 
             self._diagnostics_callback(context, item, detail, data)
