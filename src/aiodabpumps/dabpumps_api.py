@@ -93,18 +93,18 @@ class DabPumpsApi:
         self._password: str = password
 
         # Login data
-        self._login_time: float = 0
+        self._login_time: datetime|None = None
         self._login_method: DabPumpsLogin|None = None
         self._fetch_method: DabPumpsFetch|None = None
         self._auth_method: DabPumpsAuth|None = None
         self._extra_headers = {}
 
         self._access_token: str|None = None
-        self._access_expires_in: int = 0
-        self._access_expiry: datetime = datetime.min
+        self._access_expires_in: int|None = None
+        self._access_expiry: datetime|None = None
         self._refresh_token: str|None = None
-        self._refresh_expires_in: int = 0
-        self._refresh_expiry: datetime = datetime.min
+        self._refresh_expires_in: int|None = None
+        self._refresh_expiry: datetime|None = None
         self._refresh_client_id = None
         self._refresh_client_secret = None
 
@@ -299,7 +299,7 @@ class DabPumpsApi:
             case DabPumpsAuth.HEADER: access_token = self._access_token
             case _: access_token = None
 
-        if not access_token:
+        if not access_token or not self._access_expiry:
             # No acces-token to check; silently continue to the next login method (token refresh)
             return False
 
@@ -489,7 +489,7 @@ class DabPumpsApi:
             raise DabPumpsApiAuthError(error)
 
         # if we reach this point then the token was OK
-        self._login_time = time.time()
+        self._login_time = datetime.now()
         self._login_method = DabPumpsLogin.H2D_APP
         self._fetch_method = DabPumpsFetch.DABCS
         self._auth_method = DabPumpsAuth.HEADER
@@ -538,7 +538,7 @@ class DabPumpsApi:
             raise DabPumpsApiAuthError(error)
 
         # if we reach this point then the token was OK
-        self._login_time = time.time()
+        self._login_time = datetime.now()
         self._login_method = DabPumpsLogin.DABLIVE_APP_1 if isDabLive else DabPumpsLogin.DABLIVE_APP_0
         self._fetch_method = DabPumpsFetch.DCONNECT
         self._auth_method = DabPumpsAuth.HEADER
@@ -591,7 +591,7 @@ class DabPumpsApi:
             raise DabPumpsApiAuthError(error)
 
         # if we reach this point then the token was OK
-        self._login_time = time.time()
+        self._login_time = datetime.now()
         self._login_method = DabPumpsLogin.DCONNECT_APP
         self._fetch_method = DabPumpsFetch.DCONNECT
         self._auth_method = DabPumpsAuth.HEADER
@@ -651,17 +651,17 @@ class DabPumpsApi:
         # Cookie for access_token is already set by the last call
         # No need to remember access-token, we never need to pass it as header with this login method
         self._access_token = None
-        self._access_expires_in = 365*24*60*60
+        self._access_expires_in = None
         self._access_expiry = datetime.max  # Always let access-token expiry check succeed
 
         self._refresh_token = None
-        self._refresh_expires_in = 365*24*60*60
+        self._refresh_expires_in = None
         self._refresh_expiry = datetime.max # Always let refresh-token expiry check succeed
         self._refresh_client_id = None
         self._refresh_client_secret = None
 
         # Set other login parameters
-        self._login_time = time.time()
+        self._login_time = datetime.now()
         self._login_method = DabPumpsLogin.DCONNECT_WEB
         self._fetch_method = DabPumpsFetch.DCONNECT
         self._auth_method = DabPumpsAuth.COOKIE
@@ -697,15 +697,15 @@ class DabPumpsApi:
         await self._client.async_clear_cookies()
 
         self._access_token = None
-        self._access_expires_in = 0
-        self._access_expiry = datetime.min
+        self._access_expires_in = None
+        self._access_expiry = None
 
         # Do not clear refresh token when called in a 'login' context and when we were 
         # only checking the access_token
         if not (context.startswith("login") and method in [DabPumpsLogin.ACCESS_TOKEN]):
             self._refresh_token = None
-            self._refresh_expires_in = 0
-            self._refresh_expiry = datetime.min
+            self._refresh_expires_in = None
+            self._refresh_expiry = None
             self._refresh_client_id = None
             self._refresh_client_secret = None
 
@@ -713,7 +713,7 @@ class DabPumpsApi:
         # the loop iterating all login methods.
         if not context.startswith("login"):
             self._login_method = None
-            self._login_time = 0
+            self._login_time = None
 
 
     def _validate_token(self, token: str|None) -> str:
