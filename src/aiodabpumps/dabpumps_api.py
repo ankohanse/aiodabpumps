@@ -609,9 +609,6 @@ class DabPumpsApi:
         request = {
             "method": "GET",
             "url": DCONNECT_API_URL,
-            "flags": {
-                "redirects": True,
-            }
         }
 
         _LOGGER.debug(f"Try login with DConnect (web); retrieve login page via {request["method"]} {request["url"]}")
@@ -1457,10 +1454,7 @@ class DabPumpsApi:
         """GET or POST a request for JSON data"""
 
         timestamp = datetime.now()
-
-        # Add empty flags if needed
-        if not "flags" in request:
-            request["flags"] = {}
+        flags = request.get("flags", {})
 
         # Always add certain headers
         if not "headers" in request:
@@ -1503,7 +1497,7 @@ class DabPumpsApi:
             else:
                 raise DabPumpsApiConnectError(error)
         
-        if request["flags"].get("redirects",None) == False and response['status'].startswith("302"):
+        if flags.get("redirects",None) == False and response['status'].startswith("302"):
             return response["headers"].get("location", '')
 
         elif "text" in response:
