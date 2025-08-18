@@ -1009,6 +1009,7 @@ class DabPumpsApi:
             
             param = DabPumpsParams(
                 key = param_name,
+                name = self._translate_string(param_name),
                 type = param_type,
                 unit = param_unit,
                 weight = param_weight,

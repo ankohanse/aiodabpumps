@@ -46,6 +46,7 @@ class DabPumpsDevice:
 @dataclass
 class DabPumpsParams:
     key: str
+    name: str
     type: DabPumpsParamType
     unit: str
     weight: float|None
