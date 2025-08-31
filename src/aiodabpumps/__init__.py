@@ -1,5 +1,6 @@
 from .dabpumps_api import (
     DabPumpsApi, 
+    DabPumpsApiConnectError, 
     DabPumpsApiAuthError, 
     DabPumpsApiDataError, 
     DabPumpsApiError, 
