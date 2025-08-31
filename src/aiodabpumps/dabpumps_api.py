@@ -1558,15 +1558,16 @@ class DabPumpsApi:
             self._diagnostics_callback(context, item, detail, data)
     
 
-class DabPumpsApiConnectError(Exception):
-    """Exception to indicate authentication failure."""
-
-class DabPumpsApiAuthError(Exception):
-    """Exception to indicate authentication or authorization failure."""
-
 class DabPumpsApiError(Exception):
     """Exception to indicate generic error failure."""    
     
-class DabPumpsApiDataError(Exception):
+class DabPumpsApiConnectError(DabPumpsApiError):
+    """Exception to indicate authentication failure."""
+
+class DabPumpsApiAuthError(DabPumpsApiError):
+    """Exception to indicate authentication or authorization failure."""
+
+class DabPumpsApiDataError(DabPumpsApiError):
     """Exception to indicate generic data failure."""  
+
 
