@@ -1299,6 +1299,66 @@ class DabPumpsApi:
         return True
     
 
+    async def async_change_install_role(self, install_id: str, role_old: DabPumpsUserRole, role_new: DabPumpsUserRole):
+        """
+        Set a new role for the logged in user within a DAB Pumps install.
+        """
+
+        match self._fetch_method:
+            case DabPumpsFetch.DABCS: 
+                # Delete old role then add new role
+                context = f"del {install_id}:{self._username}"
+                request = {
+                    "method": "DELETE",
+                    "url": DABCS_API_URL + f"/mobile/v1/installations/{install_id}/users/{role_old}/{self._username}",
+                }
+                _LOGGER.debug(f"Del install role via {request["method"]} {request["url"]}")
+                raw = await self._async_send_request(context, request)
+
+                context = f"add {install_id}:{self._username}"
+                request = {
+                    "method": "POST",
+                    "url": DABCS_API_URL + f"/mobile/v1/installations/{install_id}/users/{role_new}/{self._username}",
+                    "headers": {
+                      'Content-Length': '0',
+                    },
+                }
+                _LOGGER.debug(f"Add install role via {request["method"]} {request["url"]}")
+                raw = await self._async_send_request(context, request)
+
+            case DabPumpsFetch.DCONNECT: 
+                # Get user_id from username
+                context = f"user {self._username}"
+                request = {
+                    "method": "GET",
+                    "url": DCONNECT_API_URL + f"/api/v1/user", # or DCONNECT_API_URL + f"/user/{username}/search"
+                }
+                _LOGGER.debug(f"Get user via {request["method"]} {request["url"]}")
+                raw = await self._async_send_request(context, request)
+
+                user_id = raw.get('user_id') or ""
+
+                # Delete old role then add new role
+                context = f"del {install_id}:{self._username}"
+                request = {
+                    "method": "GET",
+                    "url": DCONNECT_API_URL + f"/installation/{install_id}/remove/{role_old}/{user_id}",
+                }
+                _LOGGER.debug(f"Del install role via {request["method"]} {request["url"]}")
+                raw = await self._async_send_request(context, request)
+
+                context = f"add {install_id}:{self._username}"
+                request = {
+                    "method": "GET",
+                    "url": DCONNECT_API_URL + f"/installation/{install_id}/add/{role_new}/{user_id}",
+                }
+                _LOGGER.debug(f"Add install role via {request["method"]} {request["url"]}")
+                raw = await self._async_send_request(context, request)
+        
+        # If no exception was thrown then the operation was successfull
+        return True
+
+
     async def async_fetch_strings(self, lang: str):
         """Get string translations"""
     

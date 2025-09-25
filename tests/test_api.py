@@ -421,6 +421,83 @@ async def test_set_data(method, key, codes, exp_code, exp_except, request):
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("context")
 @pytest.mark.parametrize(
+    "method, exp_except",
+    [
+        ('Auto',                      None),
+        (DabPumpsLogin.H2D_APP,       None),
+        (DabPumpsLogin.DABLIVE_APP_1, None),
+        (DabPumpsLogin.DCONNECT_APP,  None),
+        (DabPumpsLogin.DCONNECT_WEB,  None),
+    ]
+)
+async def test_set_role(method, exp_except, request):
+    context = request.getfixturevalue("context")
+    context.api = DabPumpsApi(TEST_USERNAME, TEST_PASSWORD)
+    assert context.api.closed == False
+
+    # Login
+    match method:
+        case 'Auto':                        await context.api.async_login()
+        case DabPumpsLogin.H2D_APP:         await context.api._async_login_h2d_app()
+        case DabPumpsLogin.DABLIVE_APP_0:   await context.api._async_login_dablive_app(isDabLive=0)
+        case DabPumpsLogin.DABLIVE_APP_1:   await context.api._async_login_dablive_app(isDabLive=1)
+        case DabPumpsLogin.DCONNECT_APP:    await context.api._async_login_dconnect_app()
+        case DabPumpsLogin.DCONNECT_WEB:    await context.api._async_login_dconnect_web()
+
+    # Get install list
+    await context.api.async_fetch_install_list()
+
+    assert context.api.install_map is not None
+    assert type(context.api.install_map) is dict
+    assert len(context.api.install_map) > 0
+
+    # Get first install details, metadata and initial statuses
+    install = next( (install for install in context.api.install_map.values()), None)
+    assert install is not None
+    install_id = install.id
+
+    # Find current role and determine new role to change into
+    old_role = install.role
+    new_role = next( (role for role in DabPumpsUserRole if role != old_role), None )
+
+    # Change role and do immediate test of changed value. 
+    # We hold the changed value while the backend is processing the change.
+    changed = await context.api.async_change_install_role(install_id, old_role, new_role)
+    if changed:
+        await context.api.async_fetch_install_list()
+
+        install = next( (install for install in context.api.install_map.values() if install.id == install_id), None)
+        assert install is not None
+        assert install.role == new_role
+        _LOGGER.debug(f"Found role changed from {old_role} to {new_role}")
+
+        # Wait until the backend has processed the change and test again
+        _LOGGER.debug(f"Wait for DAB Servers to process the change")
+        await asyncio.sleep(40)
+        await context.api.async_login()
+
+    # Test after change has been processed by backend
+    await context.api.async_fetch_install_list()
+
+    install = next( (install for install in context.api.install_map.values() if install.id == install_id), None)
+    assert install is not None
+    assert install.role == new_role
+    _LOGGER.debug(f"Found role still changed from {old_role} to {new_role}")
+
+    # Change back to original value and do immediate test of changed value
+    changed = await context.api.async_change_install_role(install_id, new_role, old_role)
+    if changed:
+        await context.api.async_fetch_install_list()
+
+        install = next( (install for install in context.api.install_map.values() if install.id == install_id), None)
+        assert install is not None
+        assert install.role == old_role
+        _LOGGER.debug(f"Found role changed back from {new_role} to {old_role}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("context")
+@pytest.mark.parametrize(
     "name, lang, exp_lang",
     [
         ("strings en", 'en', 'en'),
